@@ -1,23 +1,56 @@
 {
   "name": "whatsapp-bot",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "Backend operativo para bot de WhatsApp con reportes, programaciones y multimedia.",
+  "main": "build/main.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "rimraf build && ts-node-dev --respawn --transpile-only --require tsconfig-paths/register --ignore-watch node_modules --ignore-watch auth src/main.ts",
+    "build": "tsc && tsc-alias",
+    "start": "node build/main.js",
+    "clean": "rimraf build logs",
+    "format": "prettier --write \"src/**/*.ts\""
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "whatsapp",
+    "baileys",
+    "typeorm",
+    "postgres"
+  ],
+  "author": "Manuel",
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "app-root-path": "^3.1.0",
+    "cors": "^2.8.5",
     "dotenv": "^17.2.3",
-    "node-cron": "^4.2.1"
+    "express": "^5.1.0",
+    "helmet": "^8.1.0",
+    "morgan": "^1.10.0",
+    "multer": "^2.0.2",
+    "node-cron": "^4.2.1",
+    "pg": "^8.16.3",
+    "qrcode-terminal": "^0.12.0",
+    "reflect-metadata": "^0.2.2",
+    "typeorm": "^0.3.28",
+    "winston": "^3.18.3"
   },
   "devDependencies": {
-    "@types/node": "^25.1.0",
+    "@types/app-root-path": "^1.2.8",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.3",
+    "@types/morgan": "^1.9.10",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.5.2",
+    "@types/qrcode-terminal": "^0.12.2",
+    "prettier": "^3.6.2",
+    "rimraf": "^6.0.1",
+    "tsconfig-paths": "^4.2.0",
     "ts-node-dev": "^2.0.0",
+    "tsc-alias": "^1.8.16",
     "typescript": "^5.9.3"
+  },
+  "_moduleAliases": {
+    "@": "build"
   }
 }
