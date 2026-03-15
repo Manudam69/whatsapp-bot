@@ -19,7 +19,7 @@ export class NotificationDispatch extends EntityBase {
   @Column({ default: 'PENDING' })
   status: DispatchStatus
 
-  @Column({ default: 1 })
+  @Column({ default: 0 })
   attempts: number
 
   @Column({ name: 'executed_at', type: 'timestamptz' })

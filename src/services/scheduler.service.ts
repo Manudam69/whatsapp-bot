@@ -4,47 +4,49 @@ import { config } from '@/config'
 import { NotificationDispatch } from '@/entities/notification_dispatch.entity'
 import { NotificationSchedule } from '@/entities/notification_schedule.entity'
 import { groupService } from './group.service'
-import { whatsappService } from './whatsapp.service'
+import { outboundMessageService } from './outbound_message.service'
 import { getTimeParts } from '@/utils/time'
 import { sleep } from '@/utils/sleep'
 import logger from '@/utils/logger'
 
 async function dispatchSchedule(schedule: NotificationSchedule, executionKey: string) {
   for (const groupJid of schedule.groupJids) {
-    let attempts = 0
-    let sent = false
-    let lastError = ''
-
-    while (attempts < schedule.retryLimit && !sent) {
-      attempts += 1
-      try {
-        if (schedule.mediaAsset?.filePath) {
-          await whatsappService.sendMedia(groupJid, path.resolve(process.cwd(), schedule.mediaAsset.filePath), schedule.messageText)
-        } else if (schedule.messageText) {
-          await whatsappService.sendText(groupJid, schedule.messageText)
-        }
-
-        sent = true
-      } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error)
-        logger.error(`Scheduled dispatch failed for ${groupJid} on attempt ${attempts}: ${lastError}`)
-        if (attempts < schedule.retryLimit) {
-          await sleep(schedule.throttleMs)
-        }
-      }
-    }
-
-    await NotificationDispatch.save({
+    const dispatch = await NotificationDispatch.save({
       schedule,
       groupJid,
       groupName: (await groupService.resolveGroupName(groupJid)) || undefined,
-      status: sent ? 'SENT' : 'FAILED',
-      attempts,
+      status: 'PENDING',
+      attempts: 0,
       executedAt: new Date(),
       messageText: schedule.messageText,
       mediaAssetPath: schedule.mediaAsset?.filePath,
-      errorMessage: sent ? undefined : lastError,
+      errorMessage: undefined,
     })
+
+    if (schedule.mediaAsset?.filePath) {
+      await outboundMessageService.queueMedia({
+        recipientJid: groupJid,
+        filePath: path.resolve(process.cwd(), schedule.mediaAsset.filePath),
+        caption: schedule.messageText,
+        sourceType: 'SCHEDULE',
+        sourceId: schedule.id,
+        maxAttempts: schedule.retryLimit,
+        retryDelayMs: schedule.throttleMs,
+        metadata: { dispatchId: dispatch.id },
+      })
+    } else if (schedule.messageText) {
+      await outboundMessageService.queueText({
+        recipientJid: groupJid,
+        text: schedule.messageText,
+        sourceType: 'SCHEDULE',
+        sourceId: schedule.id,
+        maxAttempts: schedule.retryLimit,
+        retryDelayMs: schedule.throttleMs,
+        metadata: { dispatchId: dispatch.id },
+      })
+    } else {
+      logger.warn(`Schedule ${schedule.id} has no message content for group ${groupJid}`)
+    }
 
     await sleep(schedule.throttleMs)
   }

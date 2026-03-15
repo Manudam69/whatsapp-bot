@@ -1,8 +1,9 @@
 import { ClientContact } from '@/entities/client_contact.entity'
 import { InboundMessage } from '@/entities/inbound_message.entity'
 import { ParsedIncidentReport } from './report_parser.service'
+import { outboundMessageService } from './outbound_message.service'
 import { reportService, formatReportMessage } from './report.service'
-import { whatsappService } from './whatsapp.service'
+import { whatsappIdentityService } from './whatsapp_identity.service'
 import logger from '@/utils/logger'
 
 const INITIAL_PROMPT =
@@ -21,10 +22,6 @@ const PROMPTS = {
   invalidConfirmation: '*Respuesta no valida*\n\nResponde *SI* para confirmar o *NO* para capturar de nuevo.',
   restart: '*Se reiniciara la captura del reporte.*\n\nVolvamos a comenzar.',
 } as const
-
-function extractPhoneNumber(jid: string) {
-  return jid.split('@')[0]
-}
 
 function fillTemplate(template: string, values: Record<string, string>) {
   return Object.entries(values).reduce((result, [key, value]) => result.split(`{{${key}}}`).join(value), template)
@@ -66,31 +63,8 @@ async function startCapture(contact: ClientContact, jid: string) {
   resetDraft(contact)
   contact.currentFlow = 'AWAITING_SERVICE'
   await contact.save()
-  await whatsappService.sendText(jid, INITIAL_PROMPT)
-  await whatsappService.sendText(jid, PROMPTS.service)
-}
-
-async function findOrCreateContact(jid: string, contactName?: string) {
-  const phoneNumber = extractPhoneNumber(jid)
-  const existing = await ClientContact.findOne({ where: { whatsappJid: jid } })
-  if (existing) {
-    existing.phoneNumber = phoneNumber
-    existing.contactName = contactName || existing.contactName
-    existing.lastInboundAt = new Date()
-    await existing.save()
-    return existing
-  }
-
-  const contact = ClientContact.create({
-    phoneNumber,
-    whatsappJid: jid,
-    contactName,
-    currentFlow: 'IDLE',
-    lastInboundAt: new Date(),
-  })
-
-  await contact.save()
-  return contact
+  await outboundMessageService.queueText({ recipientJid: jid, text: INITIAL_PROMPT, sourceType: 'FLOW_REPLY' })
+  await outboundMessageService.queueText({ recipientJid: jid, text: PROMPTS.service, sourceType: 'FLOW_REPLY' })
 }
 
 export const inboundMessageService = {
@@ -106,7 +80,14 @@ export const inboundMessageService = {
       return
     }
 
-    const contact = await findOrCreateContact(input.fromJid, input.contactName)
+    if (input.externalMessageId) {
+      const existingMessage = await InboundMessage.findOne({ where: { externalMessageId: input.externalMessageId } })
+      if (existingMessage) {
+        return
+      }
+    }
+
+    const contact = await whatsappIdentityService.upsertContactFromInbound(input.fromJid, input.contactName, input.rawPayload)
     normalizeFlow(contact)
 
     await InboundMessage.save({
@@ -122,7 +103,7 @@ export const inboundMessageService = {
     if (trimmedText.toUpperCase() === CANCEL_COMMAND) {
       resetDraft(contact)
       await contact.save()
-      await whatsappService.sendText(input.fromJid, PROMPTS.cancelled)
+      await outboundMessageService.queueText({ recipientJid: input.fromJid, text: PROMPTS.cancelled, sourceType: 'FLOW_REPLY' })
       return
     }
 
@@ -135,7 +116,7 @@ export const inboundMessageService = {
       contact.draftServiceName = trimmedText
       contact.currentFlow = 'AWAITING_DATE'
       await contact.save()
-      await whatsappService.sendText(input.fromJid, PROMPTS.date)
+      await outboundMessageService.queueText({ recipientJid: input.fromJid, text: PROMPTS.date, sourceType: 'FLOW_REPLY' })
       return
     }
 
@@ -143,7 +124,7 @@ export const inboundMessageService = {
       contact.draftIncidentDate = trimmedText
       contact.currentFlow = 'AWAITING_TIME'
       await contact.save()
-      await whatsappService.sendText(input.fromJid, PROMPTS.time)
+      await outboundMessageService.queueText({ recipientJid: input.fromJid, text: PROMPTS.time, sourceType: 'FLOW_REPLY' })
       return
     }
 
@@ -151,7 +132,7 @@ export const inboundMessageService = {
       contact.draftIncidentTime = trimmedText
       contact.currentFlow = 'AWAITING_INCIDENT'
       await contact.save()
-      await whatsappService.sendText(input.fromJid, PROMPTS.incident)
+      await outboundMessageService.queueText({ recipientJid: input.fromJid, text: PROMPTS.incident, sourceType: 'FLOW_REPLY' })
       return
     }
 
@@ -159,7 +140,7 @@ export const inboundMessageService = {
       contact.draftIncidentText = trimmedText
       contact.currentFlow = 'AWAITING_CONFIRMATION'
       await contact.save()
-      await whatsappService.sendText(input.fromJid, buildConfirmationMessage(contact))
+      await outboundMessageService.queueText({ recipientJid: input.fromJid, text: buildConfirmationMessage(contact), sourceType: 'FLOW_REPLY' })
       return
     }
 
@@ -176,13 +157,13 @@ export const inboundMessageService = {
       contact.draftIncidentTime = undefined
       contact.draftIncidentText = undefined
       await contact.save()
-      await whatsappService.sendText(input.fromJid, PROMPTS.restart)
-      await whatsappService.sendText(input.fromJid, PROMPTS.service)
+      await outboundMessageService.queueText({ recipientJid: input.fromJid, text: PROMPTS.restart, sourceType: 'FLOW_REPLY' })
+      await outboundMessageService.queueText({ recipientJid: input.fromJid, text: PROMPTS.service, sourceType: 'FLOW_REPLY' })
       return
     }
 
     if (normalizedConfirmation !== 'SI' && normalizedConfirmation !== 'SÍ') {
-      await whatsappService.sendText(input.fromJid, PROMPTS.invalidConfirmation)
+      await outboundMessageService.queueText({ recipientJid: input.fromJid, text: PROMPTS.invalidConfirmation, sourceType: 'FLOW_REPLY' })
       return
     }
 
@@ -197,17 +178,31 @@ export const inboundMessageService = {
         throw new Error('OPERATIONS_GROUP_JID is not configured')
       }
 
-      await whatsappService.sendText(operationsGroupJid, formatReportMessage(report))
-      await reportService.markForwarded(report, operationsGroupJid)
+      await reportService.markQueued(report, operationsGroupJid)
+      await outboundMessageService.queueText({
+        recipientJid: operationsGroupJid,
+        text: formatReportMessage(report),
+        sourceType: 'REPORT_FORWARD',
+        sourceId: report.id,
+        metadata: { groupJid: operationsGroupJid },
+      })
       resetDraft(contact)
       await contact.save()
-      await whatsappService.sendText(input.fromJid, fillTemplate(PROMPTS.confirmed, { folio: report.folio }))
+      await outboundMessageService.queueText({
+        recipientJid: input.fromJid,
+        text: fillTemplate(PROMPTS.confirmed, { folio: report.folio }),
+        sourceType: 'FLOW_REPLY',
+      })
     } catch (error) {
       logger.error(`Failed to forward incident report ${report.folio}: ${error instanceof Error ? error.message : String(error)}`)
       await reportService.markFailed(report, operationsGroupJid || undefined)
       resetDraft(contact)
       await contact.save()
-      await whatsappService.sendText(input.fromJid, fillTemplate(PROMPTS.confirmed, { folio: report.folio }))
+      await outboundMessageService.queueText({
+        recipientJid: input.fromJid,
+        text: fillTemplate(PROMPTS.confirmed, { folio: report.folio }),
+        sourceType: 'FLOW_REPLY',
+      })
     }
   },
 }

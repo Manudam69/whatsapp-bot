@@ -49,6 +49,7 @@ Si despues necesitas una capa mas robusta o compliance formal, este backend pued
 - Permiten texto, imagen o texto + imagen.
 - Configuracion por dias de semana, horarios, grupos destino, reintentos, throttle y activacion.
 - Historial de envios con exito o error por grupo.
+- Cola persistente de salida para no perder envios si WhatsApp se desconecta temporalmente.
 
 ### 4. Multimedia reutilizable
 
@@ -146,7 +147,7 @@ Campos funcionales principales:
 - `folio`: identificador operativo del reporte.
 - `contact_id`: cliente que genero el reporte.
 - `service_name`, `incident_date`, `incident_time`, `incident_text`: datos operativos del reporte.
-- `status`: `RECEIVED`, `FORWARDED` o `FAILED`.
+- `status`: `RECEIVED`, `QUEUED`, `FORWARDED` o `FAILED`.
 - `received_at`, `forwarded_at`: fechas clave del proceso.
 - `forwarded_group_jid`, `forwarded_group_name`: destino operativo.
 
@@ -233,6 +234,26 @@ Campos funcionales principales:
 - `executed_at`: fecha de ejecucion.
 - `error_message`: detalle de fallo si existio.
 
+### `outbound_messages`
+
+Cola persistente de mensajes salientes para soportar reconexion y reintentos.
+
+Uso:
+
+- Guardar cada salida antes de enviarla por WhatsApp.
+- Reintentar automaticamente cuando hay fallos temporales.
+- Reprocesar pendientes al reconectar la sesion.
+- Evitar perder reportes y programaciones por desconexiones breves.
+
+Campos funcionales principales:
+
+- `recipient_jid`: destino del mensaje.
+- `message_type`: texto o imagen.
+- `status`: `PENDING`, `SENT` o `FAILED`.
+- `attempts`, `max_attempts`, `retry_delay_ms`: control de reintentos.
+- `source_type`, `source_id`: origen operativo del envio.
+- `sent_at`, `error_message`: resultado final del intento.
+
 ## Relacion funcional entre tablas
 
 - Un registro en `client_contacts` puede tener muchos `inbound_messages`.
@@ -248,6 +269,11 @@ Campos funcionales principales:
 - `GET /api/healthcheck`
 
 ### WhatsApp
+
+- `GET /api/whatsapp/session`: estado actual de la sesion.
+- `POST /api/whatsapp/session`: inicia o intenta iniciar la sesion actual.
+- `DELETE /api/whatsapp/session`: desconecta la sesion activa sin borrar credenciales.
+- `POST /api/whatsapp/session/reset`: desconecta, limpia `auth` y genera una nueva vinculacion para cambiar de numero.
 
 - `GET /api/whatsapp/session`
 - `POST /api/whatsapp/session`

@@ -55,6 +55,14 @@ export const reportService = {
     return report
   },
 
+  async markQueued(report: IncidentReport, groupJid: string) {
+    report.status = 'QUEUED'
+    report.forwardedGroupJid = groupJid
+    report.forwardedGroupName = (await groupService.resolveGroupName(groupJid)) || undefined
+    await report.save()
+    return report
+  },
+
   async markFailed(report: IncidentReport, groupJid?: string) {
     report.status = 'FAILED'
     report.forwardedGroupJid = groupJid

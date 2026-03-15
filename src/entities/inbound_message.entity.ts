@@ -1,7 +1,8 @@
-import { Column, Entity, ManyToOne, JoinColumn } from 'typeorm'
+import { Column, Entity, Index, ManyToOne, JoinColumn } from 'typeorm'
 import { EntityBase } from './entity.base'
 import { ClientContact } from './client_contact.entity'
 
+@Index('IDX_inbound_messages_external_message_id', ['externalMessageId'], { unique: true })
 @Entity({ name: 'inbound_messages' })
 export class InboundMessage extends EntityBase {
   @ManyToOne(() => ClientContact, (contact) => contact.inboundMessages, { eager: true, nullable: false })

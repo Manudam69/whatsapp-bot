@@ -28,6 +28,15 @@ export async function disconnectSession(req: Request, res: Response, next: NextF
   }
 }
 
+export async function resetSession(req: Request, res: Response, next: NextFunction) {
+  try {
+    const session = await whatsappService.reset()
+    res.json(session)
+  } catch (error) {
+    next(error)
+  }
+}
+
 export async function listGroups(req: Request, res: Response, next: NextFunction) {
   try {
     const groups = await groupService.list()

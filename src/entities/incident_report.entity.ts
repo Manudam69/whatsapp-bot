@@ -2,7 +2,7 @@ import { Column, Entity, JoinColumn, ManyToOne } from 'typeorm'
 import { EntityBase } from './entity.base'
 import { ClientContact } from './client_contact.entity'
 
-export type ReportStatus = 'RECEIVED' | 'FORWARDED' | 'FAILED'
+export type ReportStatus = 'RECEIVED' | 'QUEUED' | 'FORWARDED' | 'FAILED'
 
 @Entity({ name: 'incident_reports' })
 export class IncidentReport extends EntityBase {
