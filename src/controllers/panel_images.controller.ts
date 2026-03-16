@@ -40,3 +40,16 @@ export async function deleteImage(req: Request, res: Response, next: NextFunctio
     next(error)
   }
 }
+
+export async function updateImage(req: Request, res: Response, next: NextFunction) {
+  try {
+    const imageId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
+    const asset = await mediaAssetService.update(imageId, {
+      name: req.body?.name,
+    })
+
+    res.json(panelAdminService.mapImage(req, asset))
+  } catch (error) {
+    next(error)
+  }
+}
