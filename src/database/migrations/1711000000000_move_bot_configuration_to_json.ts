@@ -46,7 +46,8 @@ export class MoveBotConfigurationToJson1711000000000 implements MigrationInterfa
     await queryRunner.query(`ALTER TABLE "bot_configurations" ADD COLUMN IF NOT EXISTS "dispatch_window_minutes" integer NOT NULL DEFAULT 12`)
     await queryRunner.query(`ALTER TABLE "bot_configurations" ADD COLUMN IF NOT EXISTS "concurrency_limit" integer NOT NULL DEFAULT 18`)
     await queryRunner.query(`ALTER TABLE "bot_configurations" ADD COLUMN IF NOT EXISTS "operational_group_id" character varying`)
-    await queryRunner.query(`ALTER TABLE "bot_configurations" ADD COLUMN IF NOT EXISTS "first_reply_text" text NOT NULL DEFAULT 'Gracias por tu mensaje. Tu reporte fue recibido y enviado al grupo operativo para seguimiento.'`)
+    await queryRunner.query(`ALTER TABLE "bot_configurations" ADD COLUMN IF NOT EXISTS "first_reply_text" text NOT NULL DEFAULT '*ASISTENTE DE REPORTES* Se capturara la informacion *paso a paso*.
+  Si deseas cancelar la captura, escribe *CANCELAR*.'`)
     await queryRunner.query(`ALTER TABLE "bot_configurations" ADD COLUMN IF NOT EXISTS "first_reply_enabled" boolean NOT NULL DEFAULT true`)
     await queryRunner.query(`ALTER TABLE "bot_configurations" ADD COLUMN IF NOT EXISTS "confirmation_enabled" boolean NOT NULL DEFAULT true`)
     await queryRunner.query(`ALTER TABLE "bot_configurations" ADD COLUMN IF NOT EXISTS "strategy" character varying NOT NULL DEFAULT 'hybrid-automation'`)
@@ -60,7 +61,8 @@ export class MoveBotConfigurationToJson1711000000000 implements MigrationInterfa
         "dispatch_window_minutes" = COALESCE(("settings" ->> 'dispatchWindowMinutes')::integer, 12),
         "concurrency_limit" = COALESCE(("settings" ->> 'concurrencyLimit')::integer, 18),
         "operational_group_id" = NULLIF("settings" ->> 'operationalGroupId', ''),
-        "first_reply_text" = COALESCE("settings" ->> 'firstReplyText', 'Gracias por tu mensaje. Tu reporte fue recibido y enviado al grupo operativo para seguimiento.'),
+        "first_reply_text" = COALESCE("settings" ->> 'firstReplyText', '*ASISTENTE DE REPORTES* Se capturara la informacion *paso a paso*.
+      Si deseas cancelar la captura, escribe *CANCELAR*.'),
         "first_reply_enabled" = COALESCE(("settings" ->> 'firstReplyEnabled')::boolean, true),
         "confirmation_enabled" = COALESCE(("settings" ->> 'confirmationEnabled')::boolean, true),
         "strategy" = COALESCE("settings" ->> 'strategy', 'hybrid-automation')

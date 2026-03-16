@@ -25,6 +25,11 @@ export const DEFAULT_REVIEWED_REPLY_TEXT = [
   'Te compartiremos una nueva actualizacion cuando quede resuelto.',
 ].join('\n')
 
+export const DEFAULT_FIRST_REPLY_TEXT = [
+  '*ASISTENTE DE REPORTES* Se capturara la informacion *paso a paso*.',
+  'Si deseas cancelar la captura, escribe *CANCELAR*.',
+].join('\n')
+
 export const DEFAULT_RESOLVED_REPLY_TEXT = [
   '*ACTUALIZACION DE REPORTE*',
   '',
@@ -39,7 +44,7 @@ const DEFAULT_SETTINGS: BotConfigurationSettings = {
   dispatchWindowMinutes: 12,
   concurrencyLimit: 18,
   operationalGroupId: undefined,
-  firstReplyText: 'Gracias por tu mensaje. Tu reporte fue recibido y enviado al grupo operativo para seguimiento.',
+  firstReplyText: DEFAULT_FIRST_REPLY_TEXT,
   firstReplyEnabled: true,
   confirmationEnabled: true,
   reviewedReplyText: DEFAULT_REVIEWED_REPLY_TEXT,

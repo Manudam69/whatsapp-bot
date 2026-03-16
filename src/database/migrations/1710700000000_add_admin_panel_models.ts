@@ -15,7 +15,8 @@ export class AddAdminPanelModels1710700000000 implements MigrationInterface {
         "dispatch_window_minutes" integer NOT NULL DEFAULT 12,
         "concurrency_limit" integer NOT NULL DEFAULT 18,
         "operational_group_id" character varying,
-        "first_reply_text" text NOT NULL DEFAULT 'Gracias por tu mensaje. Tu reporte fue recibido y enviado al grupo operativo para seguimiento.',
+        "first_reply_text" text NOT NULL DEFAULT '*ASISTENTE DE REPORTES* Se capturara la informacion *paso a paso*.
+      Si deseas cancelar la captura, escribe *CANCELAR*.',
         "first_reply_enabled" boolean NOT NULL DEFAULT true,
         "confirmation_enabled" boolean NOT NULL DEFAULT true,
         "strategy" character varying NOT NULL DEFAULT 'hybrid-automation',
