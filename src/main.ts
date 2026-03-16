@@ -16,6 +16,20 @@ import { whatsappService } from '@/services/whatsapp.service'
 const app = express()
 const router = express.Router()
 
+const corsOptions: cors.CorsOptions = {
+  origin(origin, callback) {
+    if (!origin || config.ALLOW_ORIGINS.includes(origin)) {
+      callback(null, true)
+      return
+    }
+
+    callback(new Error(`Origin not allowed by CORS: ${origin}`))
+  },
+  methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Authorization', 'Content-Type'],
+  optionsSuccessStatus: 204,
+}
+
 async function bootstrap() {
   validateConfig()
 
@@ -33,7 +47,8 @@ async function bootstrap() {
   await initFileBasedRoutes(router)
 
   app.use(morgan('[:date[iso]] (:status) ":method :url HTTP/:http-version" :response-time ms - [:res[content-length]]'))
-  app.use(cors({ origin: config.ALLOW_ORIGINS }))
+  app.use(cors(corsOptions))
+  app.options('*', cors(corsOptions))
   app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   }))
