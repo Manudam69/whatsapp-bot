@@ -6,17 +6,19 @@ import { NotificationSchedule } from '@/entities/notification_schedule.entity'
 import { OutboundMessage } from '@/entities/outbound_message.entity'
 import { WhatsappGroup } from '@/entities/whatsapp_group.entity'
 import { panelAdminService } from '@/services/panel_admin.service'
+import { panelConversationsService } from '@/services/panel_conversations.service'
 import { whatsappService } from '@/services/whatsapp.service'
 
 export async function getDashboardOverview(req: Request, res: Response, next: NextFunction) {
   try {
-    const [groups, schedules, reports, dispatches, messages, pendingOutbound] = await Promise.all([
+    const [groups, schedules, reports, dispatches, messages, pendingOutbound, conversations] = await Promise.all([
       WhatsappGroup.find({ where: { isMember: true } }),
       NotificationSchedule.find(),
       IncidentReport.find({ order: { receivedAt: 'DESC' }, take: 50 }),
       NotificationDispatch.find({ order: { executedAt: 'DESC' }, take: 100 }),
       AutoMessage.find(),
       OutboundMessage.count({ where: { status: 'PENDING' } }),
+      panelConversationsService.list(req, 5),
     ])
 
     const now = Date.now()
@@ -93,6 +95,7 @@ export async function getDashboardOverview(req: Request, res: Response, next: Ne
         successRate,
       },
       timeline,
+      conversations,
     })
   } catch (error) {
     next(error)
