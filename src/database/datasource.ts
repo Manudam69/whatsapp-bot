@@ -7,13 +7,18 @@ function getEntities() {
   const entitiesDir = path.resolve(__dirname, '../entities')
   return fs
     .readdirSync(entitiesDir, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name))
     .map((entry) => (entry.isDirectory() || !entry.name.endsWith('.entity.js') && !entry.name.endsWith('.entity.ts') ? '' : path.join(entitiesDir, entry.name)))
     .filter(Boolean)
 }
 
 function getMigrations() {
   const migrationsDir = path.resolve(__dirname, './migrations')
-  return fs.readdirSync(migrationsDir, { withFileTypes: true }).map((entry) => (entry.isDirectory() ? '' : path.join(migrationsDir, entry.name))).filter(Boolean)
+  return fs
+    .readdirSync(migrationsDir, { withFileTypes: true })
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((entry) => (entry.isDirectory() ? '' : path.join(migrationsDir, entry.name)))
+    .filter(Boolean)
 }
 
 export const AppDataSource = new DataSource({
