@@ -38,6 +38,28 @@ export function formatReportMessage(report: IncidentReport) {
   ].join('\n')
 }
 
+export function formatReportStatusNotification(report: IncidentReport) {
+  if (report.reviewStatus === 'reviewed') {
+    return [
+      '*ACTUALIZACION DE REPORTE*',
+      '',
+      `Tu reporte *${report.folio}* ya esta siendo revisado por el equipo.`,
+      'Te compartiremos una nueva actualizacion cuando quede resuelto.',
+    ].join('\n')
+  }
+
+  if (report.reviewStatus === 'resolved') {
+    return [
+      '*ACTUALIZACION DE REPORTE*',
+      '',
+      `Tu reporte *${report.folio}* fue marcado como resuelto.`,
+      'Si el problema continua, responde a este mensaje para dar seguimiento.',
+    ].join('\n')
+  }
+
+  return null
+}
+
 export const reportService = {
   async createFromInbound(contact: ClientContact, parsed: ParsedIncidentReport, sourceMessage: string) {
     const report = IncidentReport.create({

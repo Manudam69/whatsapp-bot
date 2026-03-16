@@ -3,7 +3,7 @@ import { EntityBase } from './entity.base'
 
 export type OutboundMessageStatus = 'PENDING' | 'SENT' | 'FAILED'
 export type OutboundMessageType = 'TEXT' | 'IMAGE'
-export type OutboundMessageSource = 'FLOW_REPLY' | 'REPORT_FORWARD' | 'SCHEDULE'
+export type OutboundMessageSource = 'FLOW_REPLY' | 'REPORT_FORWARD' | 'REPORT_STATUS_UPDATE' | 'SCHEDULE'
 
 @Entity({ name: 'outbound_messages' })
 export class OutboundMessage extends EntityBase {
