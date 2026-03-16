@@ -23,7 +23,12 @@ export async function initFileBasedRoutes(router: Router, routePath: string[] = 
       continue
     }
 
-    const controller = (await import(path.join(currentDir, entry.name))).default as RestController
+    const importedModule = await import(path.join(currentDir, entry.name))
+    const resolvedModule = 'default' in importedModule ? importedModule.default : importedModule
+    const controller = ('default' in (resolvedModule as Record<string, unknown>)
+      ? (resolvedModule as { default: RestController }).default
+      : resolvedModule) as RestController
+
     if (!controller) {
       continue
     }
