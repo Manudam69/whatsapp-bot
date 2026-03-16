@@ -20,7 +20,12 @@ const defaultFirstReply = 'Gracias por tu mensaje. Tu reporte fue recibido y env
 
 export const botConfigurationService = {
   async get() {
-    let settings = await BotConfiguration.findOne({ order: { createdAt: 'ASC' } })
+    const [settingsRecord] = await BotConfiguration.find({
+      order: { createdAt: 'ASC' },
+      take: 1,
+    })
+
+    let settings = settingsRecord
     if (!settings) {
       settings = await BotConfiguration.save({
         reportKeyword: 'REPORTE',
