@@ -1,7 +1,7 @@
 import { getBotSettings, updateBotSettings } from '@/controllers/panel_settings.controller'
-import { authenticate, requireAdmin } from '@/middlewares/authenticate'
+import { authenticate, requireAdmin, requireConnectedWhatsappSession } from '@/middlewares/authenticate'
 
 export default {
   GET: [authenticate, getBotSettings],
-  PUT: [authenticate, requireAdmin, updateBotSettings],
+  PUT: [authenticate, requireAdmin, requireConnectedWhatsappSession, updateBotSettings],
 } satisfies RestController

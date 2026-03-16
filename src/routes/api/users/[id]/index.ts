@@ -1,7 +1,7 @@
 import { deleteUser, updateUser } from '@/controllers/users.controller'
-import { authenticate, requireAdmin } from '@/middlewares/authenticate'
+import { authenticate, requireAdmin, requireConnectedWhatsappSession } from '@/middlewares/authenticate'
 
 export default {
-  PUT: [authenticate, requireAdmin, updateUser],
-  DELETE: [authenticate, requireAdmin, deleteUser],
+  PUT: [authenticate, requireAdmin, requireConnectedWhatsappSession, updateUser],
+  DELETE: [authenticate, requireAdmin, requireConnectedWhatsappSession, deleteUser],
 } satisfies RestController

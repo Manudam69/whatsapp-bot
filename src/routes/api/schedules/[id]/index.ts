@@ -1,7 +1,7 @@
 import { deleteSchedule, updateSchedule } from '@/controllers/panel_schedules.controller'
-import { authenticate, requireAdmin } from '@/middlewares/authenticate'
+import { authenticate, requireAdmin, requireConnectedWhatsappSession } from '@/middlewares/authenticate'
 
 export default {
-  PUT: [authenticate, requireAdmin, updateSchedule],
-  DELETE: [authenticate, requireAdmin, deleteSchedule],
+  PUT: [authenticate, requireAdmin, requireConnectedWhatsappSession, updateSchedule],
+  DELETE: [authenticate, requireAdmin, requireConnectedWhatsappSession, deleteSchedule],
 } satisfies RestController

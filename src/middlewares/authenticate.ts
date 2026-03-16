@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response } from 'express'
 import { Forbidden, Unauthorized } from './error_handler'
 import { authService } from '@/services/auth.service'
+import { whatsappService } from '@/services/whatsapp.service'
 
 function getBearerToken(req: Request) {
   const authorization = req.headers.authorization
@@ -28,6 +29,18 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
     }
     if (req.authUser.role !== 'admin') {
       throw Forbidden('Esta acción requiere permisos de administrador.')
+    }
+
+    next()
+  } catch (error) {
+    next(error)
+  }
+}
+
+export function requireConnectedWhatsappSession(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (whatsappService.getSessionState().status !== 'connected') {
+      throw Forbidden('Conecta la sesión de WhatsApp para poder modificar el sistema.')
     }
 
     next()
