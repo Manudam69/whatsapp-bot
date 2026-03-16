@@ -15,6 +15,9 @@ export class WhatsappGroup extends EntityBase {
   @Column({ name: 'is_active', default: true })
   isActive: boolean
 
+  @Column({ name: 'is_member', default: true })
+  isMember: boolean
+
   @Column({ name: 'last_synced_at', type: 'timestamptz', nullable: true })
   lastSyncedAt?: Date
 }

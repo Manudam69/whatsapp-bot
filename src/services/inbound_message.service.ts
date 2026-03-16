@@ -2,6 +2,7 @@ import { ClientContact } from '@/entities/client_contact.entity'
 import { InboundMessage } from '@/entities/inbound_message.entity'
 import { ParsedIncidentReport } from './report_parser.service'
 import { outboundMessageService } from './outbound_message.service'
+import { botConfigurationService } from './bot_configuration.service'
 import { reportService, formatReportMessage } from './report.service'
 import { whatsappIdentityService } from './whatsapp_identity.service'
 import logger from '@/utils/logger'
@@ -60,10 +61,19 @@ function buildConfirmationMessage(contact: ClientContact) {
 }
 
 async function startCapture(contact: ClientContact, jid: string) {
+  const settings = await botConfigurationService.get()
   resetDraft(contact)
   contact.currentFlow = 'AWAITING_SERVICE'
   await contact.save()
-  await outboundMessageService.queueText({ recipientJid: jid, text: INITIAL_PROMPT, sourceType: 'FLOW_REPLY' })
+  if (settings.firstReplyEnabled) {
+    await outboundMessageService.queueText({
+      recipientJid: jid,
+      text: settings.firstReplyText?.trim() || INITIAL_PROMPT,
+      sourceType: 'FLOW_REPLY',
+    })
+  } else {
+    await outboundMessageService.queueText({ recipientJid: jid, text: INITIAL_PROMPT, sourceType: 'FLOW_REPLY' })
+  }
   await outboundMessageService.queueText({ recipientJid: jid, text: PROMPTS.service, sourceType: 'FLOW_REPLY' })
 }
 
@@ -171,7 +181,8 @@ export const inboundMessageService = {
     const sourceMessage = `Servicio: ${parsed.serviceName} | Fecha: ${parsed.incidentDate} | Hora: ${parsed.incidentTime} | Incidencia: ${parsed.incidentText}`
 
     const report = await reportService.createFromInbound(contact, parsed, sourceMessage)
-    const operationsGroupJid = reportService.getOperationsGroupJid()
+    const settings = await botConfigurationService.get()
+    const operationsGroupJid = settings.operationalGroupId || reportService.getOperationsGroupJid()
 
     try {
       if (!operationsGroupJid) {
@@ -188,21 +199,25 @@ export const inboundMessageService = {
       })
       resetDraft(contact)
       await contact.save()
-      await outboundMessageService.queueText({
-        recipientJid: input.fromJid,
-        text: fillTemplate(PROMPTS.confirmed, { folio: report.folio }),
-        sourceType: 'FLOW_REPLY',
-      })
+      if (settings.confirmationEnabled) {
+        await outboundMessageService.queueText({
+          recipientJid: input.fromJid,
+          text: fillTemplate(PROMPTS.confirmed, { folio: report.folio }),
+          sourceType: 'FLOW_REPLY',
+        })
+      }
     } catch (error) {
       logger.error(`Failed to forward incident report ${report.folio}: ${error instanceof Error ? error.message : String(error)}`)
       await reportService.markFailed(report, operationsGroupJid || undefined)
       resetDraft(contact)
       await contact.save()
-      await outboundMessageService.queueText({
-        recipientJid: input.fromJid,
-        text: fillTemplate(PROMPTS.confirmed, { folio: report.folio }),
-        sourceType: 'FLOW_REPLY',
-      })
+      if (settings.confirmationEnabled) {
+        await outboundMessageService.queueText({
+          recipientJid: input.fromJid,
+          text: fillTemplate(PROMPTS.confirmed, { folio: report.folio }),
+          sourceType: 'FLOW_REPLY',
+        })
+      }
     }
   },
 }

@@ -1,4 +1,5 @@
 import { Handler } from 'express'
+import { User } from '@/entities/user.entity'
 
 declare global {
   type RestController = {
@@ -9,6 +10,14 @@ declare global {
     PATCH?: Handler | Handler[]
     HEAD?: Handler | Handler[]
     OPTIONS?: Handler | Handler[]
+  }
+}
+
+declare global {
+  namespace Express {
+    interface Request {
+      authUser?: User
+    }
   }
 }
 

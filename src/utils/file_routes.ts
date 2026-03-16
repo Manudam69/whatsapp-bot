@@ -9,7 +9,7 @@ function buildURLPath(routePath: string[]) {
 }
 
 export async function initFileBasedRoutes(router: Router, routePath: string[] = [], routeGroups: Record<string, string[]> = {}) {
-  const baseDir = path.resolve(__dirname, '..', 'routes')
+  const baseDir = path.resolve(__dirname, '..', 'routes', 'api')
   const currentDir = path.join(baseDir, ...routePath)
   const entries = fs.readdirSync(currentDir, { withFileTypes: true })
 
@@ -31,7 +31,6 @@ export async function initFileBasedRoutes(router: Router, routePath: string[] = 
     const resourceName = entry.name.includes('index') ? '/' : entry.name.slice(0, entry.name.length - 3)
     const url = buildURLPath([...routePath, resourceName])
     const prefix = url
-      .replace('api', '')
       .split('/')
       .filter(Boolean)[0] || 'root'
 

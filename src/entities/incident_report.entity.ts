@@ -31,6 +31,9 @@ export class IncidentReport extends EntityBase {
   @Column({ name: 'status', default: 'RECEIVED' })
   status: ReportStatus
 
+  @Column({ name: 'review_status', default: 'pending' })
+  reviewStatus: 'pending' | 'reviewed' | 'resolved'
+
   @Column({ name: 'received_at', type: 'timestamptz' })
   receivedAt: Date
 

@@ -9,6 +9,7 @@ import logger from '@/utils/logger'
 import { AppDataSource } from '@/database/datasource'
 import handleErrorMiddleware from '@/middlewares/error_handler'
 import { initFileBasedRoutes } from '@/utils/file_routes'
+import { authService } from '@/services/auth.service'
 import { schedulerService } from '@/services/scheduler.service'
 import { whatsappService } from '@/services/whatsapp.service'
 
@@ -24,14 +25,19 @@ async function bootstrap() {
     logger.info('Database migrations executed')
   }
 
+  await authService.ensureDefaultAdminUser()
+  logger.info(`Default admin ensured for ${config.AUTH.DEFAULT_ADMIN_EMAIL}`)
+
   await initFileBasedRoutes(router)
 
   app.use(morgan('[:date[iso]] (:status) ":method :url HTTP/:http-version" :response-time ms - [:res[content-length]]'))
   app.use(cors({ origin: config.ALLOW_ORIGINS }))
-  app.use(helmet())
+  app.use(helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  }))
   app.use(express.json())
   app.use(express.urlencoded({ extended: false }))
-  app.use('/uploads', express.static(path.resolve(process.cwd(), 'uploads')))
+  app.use('/uploads', express.static(path.resolve(config.PROJECT_ROOT, 'uploads')))
 
   app.use(router)
   app.use(handleErrorMiddleware)

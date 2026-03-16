@@ -39,6 +39,10 @@ export async function resetSession(req: Request, res: Response, next: NextFuncti
 
 export async function listGroups(req: Request, res: Response, next: NextFunction) {
   try {
+    if (whatsappService.isConnected()) {
+      await whatsappService.syncGroups()
+    }
+
     const groups = await groupService.list()
     res.json(groups)
   } catch (error) {

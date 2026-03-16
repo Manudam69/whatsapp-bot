@@ -19,6 +19,9 @@ export class NotificationSchedule extends EntityBase {
   @Column({ name: 'group_jids', type: 'jsonb', default: () => "'[]'" })
   groupJids: string[]
 
+  @Column({ name: 'message_template_id', nullable: true })
+  messageTemplateId?: string
+
   @Column({ name: 'is_active', default: true })
   isActive: boolean
 

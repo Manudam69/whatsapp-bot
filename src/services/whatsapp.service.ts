@@ -32,6 +32,7 @@ function createSilentBaileysLogger() {
 
 const baileysLogger = createSilentBaileysLogger()
 const GROUP_SYNC_INITIAL_DELAY_MS = 5000
+const GROUP_SYNC_INTERVAL_MS = 5 * 60 * 1000
 const GROUP_SYNC_RATE_LIMIT_DELAY_MS = 60000
 
 type SessionState = {
@@ -87,7 +88,7 @@ class WhatsappService {
           this.state = { status: 'connected', connectedAt: new Date() }
           logger.info('WhatsApp connection established')
           await whatsappIdentityService.repairStoredContacts()
-          this.scheduleGroupSync()
+          await this.scheduleInitialGroupSync()
           const { outboundMessageService } = await import('./outbound_message.service')
           await outboundMessageService.flushPending()
         }
@@ -204,7 +205,9 @@ class WhatsappService {
         name: group.subject,
         participantCount: group.participants.length,
       }))
-      return await groupService.upsertGroups(mapped)
+      const syncedGroups = await groupService.upsertGroups(mapped)
+      this.scheduleGroupSync(GROUP_SYNC_INTERVAL_MS)
+      return syncedGroups
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
 
@@ -215,10 +218,29 @@ class WhatsappService {
       }
 
       logger.error(`WhatsApp group sync failed: ${message}`)
+      this.scheduleGroupSync(GROUP_SYNC_INTERVAL_MS)
       return []
     } finally {
       this.syncingGroups = false
     }
+  }
+
+  private async scheduleInitialGroupSync() {
+    const latestSyncAt = await groupService.getLatestSyncAt()
+    if (!latestSyncAt) {
+      this.scheduleGroupSync()
+      return
+    }
+
+    const elapsedMs = Date.now() - latestSyncAt.getTime()
+    if (elapsedMs >= GROUP_SYNC_INTERVAL_MS) {
+      this.scheduleGroupSync()
+      return
+    }
+
+    const delayMs = Math.max(GROUP_SYNC_INITIAL_DELAY_MS, GROUP_SYNC_INTERVAL_MS - elapsedMs)
+    logger.info(`Skipping immediate WhatsApp group sync. Next sync in ${Math.ceil(delayMs / 1000)}s because groups were synced recently.`)
+    this.scheduleGroupSync(delayMs)
   }
 
   private scheduleGroupSync(delayMs = GROUP_SYNC_INITIAL_DELAY_MS) {

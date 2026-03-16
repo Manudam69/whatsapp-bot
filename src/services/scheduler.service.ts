@@ -26,7 +26,7 @@ async function dispatchSchedule(schedule: NotificationSchedule, executionKey: st
     if (schedule.mediaAsset?.filePath) {
       await outboundMessageService.queueMedia({
         recipientJid: groupJid,
-        filePath: path.resolve(process.cwd(), schedule.mediaAsset.filePath),
+        filePath: path.resolve(config.PROJECT_ROOT, schedule.mediaAsset.filePath),
         caption: schedule.messageText,
         sourceType: 'SCHEDULE',
         sourceId: schedule.id,

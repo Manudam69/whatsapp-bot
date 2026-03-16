@@ -1,4 +1,7 @@
+import fs from 'fs'
 import path from 'path'
+import { AppDataSource } from '@/database/datasource'
+import { config } from '@/config'
 import { BadRequest, NotFound } from '@/middlewares/error_handler'
 import { MediaAsset } from '@/entities/media_asset.entity'
 
@@ -58,5 +61,21 @@ export const mediaAssetService = {
       throw NotFound('Recurso multimedia no encontrado.')
     }
     return asset
+  },
+
+  async remove(id: string) {
+    const asset = await this.findById(id)
+
+    await AppDataSource.query('UPDATE auto_messages SET image_id = NULL WHERE image_id = $1', [asset.id])
+    await AppDataSource.query('UPDATE notification_schedules SET media_asset_id = NULL WHERE media_asset_id = $1', [asset.id])
+
+    const absolutePath = path.resolve(config.PROJECT_ROOT, asset.filePath)
+    await asset.remove()
+
+    if (fs.existsSync(absolutePath)) {
+      fs.rmSync(absolutePath, { force: true })
+    }
+
+    return { success: true }
   },
 }

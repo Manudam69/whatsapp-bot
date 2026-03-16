@@ -1,5 +1,7 @@
-import { updateSchedule } from '@/controllers/schedules.controller'
+import { deleteSchedule, updateSchedule } from '@/controllers/panel_schedules.controller'
+import { authenticate } from '@/middlewares/authenticate'
 
 export default {
-  PATCH: updateSchedule,
+  PUT: [authenticate, updateSchedule],
+  DELETE: [authenticate, deleteSchedule],
 } satisfies RestController

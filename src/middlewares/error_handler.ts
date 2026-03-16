@@ -12,6 +12,8 @@ class HTTPError extends Error {
 }
 
 export const BadRequest = (message: string = 'Bad Request') => new HTTPError(400, message)
+export const Unauthorized = (message: string = 'Unauthorized') => new HTTPError(401, message)
+export const Forbidden = (message: string = 'Forbidden') => new HTTPError(403, message)
 export const NotFound = (message: string = 'Not Found') => new HTTPError(404, message)
 export const Conflict = (message: string = 'Conflict') => new HTTPError(409, message)
 export const InternalServerError = (message: string = 'Internal Server Error') => new HTTPError(500, message)

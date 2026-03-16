@@ -150,7 +150,7 @@ class OutboundMessageService {
           return
         }
 
-        logger.warn(`Outbound message ${message.id} failed on attempt ${message.attempts}. Retrying...`)
+        logger.warn(`Outbound message ${message.id} failed on attempt ${message.attempts}: ${errorMessage}. Retrying...`)
         await sleep(message.retryDelayMs)
       }
     }

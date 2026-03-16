@@ -1,6 +1,7 @@
-import { createSchedule, listSchedules } from '@/controllers/schedules.controller'
+import { createSchedule, listSchedules } from '@/controllers/panel_schedules.controller'
+import { authenticate } from '@/middlewares/authenticate'
 
 export default {
-  GET: listSchedules,
-  POST: createSchedule,
+  GET: [authenticate, listSchedules],
+  POST: [authenticate, createSchedule],
 } satisfies RestController

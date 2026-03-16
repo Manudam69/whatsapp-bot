@@ -3,7 +3,7 @@ import path from 'path'
 import multer from 'multer'
 import { config } from '@/config'
 
-const uploadDir = path.resolve(process.cwd(), config.MEDIA_UPLOAD_DIR)
+const uploadDir = path.resolve(config.PROJECT_ROOT, config.MEDIA_UPLOAD_DIR)
 fs.mkdirSync(uploadDir, { recursive: true })
 
 const storage = multer.diskStorage({
@@ -11,7 +11,9 @@ const storage = multer.diskStorage({
     cb(null, uploadDir)
   },
   filename(req, file, cb) {
-    const sanitized = file.originalname.replace(/[^a-zA-Z0-9._-]/g, '_')
+    const decodedOriginalName = Buffer.from(file.originalname, 'latin1').toString('utf8')
+    file.originalname = decodedOriginalName
+    const sanitized = decodedOriginalName.normalize('NFKD').replace(/[^a-zA-Z0-9._-]/g, '_')
     cb(null, `${Date.now()}-${sanitized}`)
   },
 })

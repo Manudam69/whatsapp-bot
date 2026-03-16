@@ -10,6 +10,7 @@ export type ScheduleInput = {
   daysOfWeek: number[]
   times: string[]
   groupJids: string[]
+  messageTemplateId?: string
   isActive?: boolean
   retryLimit?: number
   throttleMs?: number
@@ -52,6 +53,7 @@ export const notificationScheduleService = {
       daysOfWeek: input.daysOfWeek,
       times: input.times,
       groupJids: input.groupJids,
+      messageTemplateId: input.messageTemplateId,
       isActive: input.isActive ?? true,
       retryLimit: input.retryLimit ?? config.MAX_SEND_RETRIES,
       throttleMs: input.throttleMs ?? config.MESSAGE_THROTTLE_MS,
@@ -83,6 +85,9 @@ export const notificationScheduleService = {
     if (input.groupJids !== undefined) {
       schedule.groupJids = input.groupJids
     }
+    if (input.messageTemplateId !== undefined) {
+      schedule.messageTemplateId = input.messageTemplateId
+    }
     if (input.isActive !== undefined) {
       schedule.isActive = input.isActive
     }
@@ -101,6 +106,7 @@ export const notificationScheduleService = {
       daysOfWeek: schedule.daysOfWeek,
       times: schedule.times,
       groupJids: schedule.groupJids,
+      messageTemplateId: schedule.messageTemplateId,
       mediaAssetId: schedule.mediaAsset?.id,
     }
     validate(candidate)
@@ -123,5 +129,11 @@ export const notificationScheduleService = {
 
   async listDispatchHistory(limit = 100) {
     return NotificationDispatch.find({ order: { executedAt: 'DESC' }, take: limit })
+  },
+
+  async remove(id: string) {
+    const schedule = await this.findById(id)
+    await schedule.remove()
+    return { success: true }
   },
 }
