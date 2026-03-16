@@ -7,18 +7,44 @@ import { OutboundMessage } from '@/entities/outbound_message.entity'
 import { WhatsappGroup } from '@/entities/whatsapp_group.entity'
 import { panelAdminService } from '@/services/panel_admin.service'
 import { panelConversationsService } from '@/services/panel_conversations.service'
+import { sessionOwnerService } from '@/services/session_owner.service'
 import { whatsappService } from '@/services/whatsapp.service'
 
 export async function getDashboardOverview(req: Request, res: Response, next: NextFunction) {
   try {
+    const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
+    if (!ownerPhoneNumber) {
+      res.json({
+        stats: {
+          activeGroups: 0,
+          totalGroups: 0,
+          activeSchedules: 0,
+          totalSchedules: 0,
+          pendingReports: 0,
+          messagesToday: 0,
+          sessionStatus: panelAdminService.mapSession(whatsappService.getSessionState()).status,
+        },
+        delivery: {
+          queueDepth: 0,
+          retrying: 0,
+          failedLast24h: 0,
+          throughputPerHour: 0,
+          successRate: 100,
+        },
+        timeline: [],
+        conversations: [],
+      })
+      return
+    }
+
     const [groups, schedules, reports, dispatches, messages, pendingOutbound, conversations] = await Promise.all([
-      WhatsappGroup.find({ where: { isMember: true } }),
-      NotificationSchedule.find(),
-      IncidentReport.find({ order: { receivedAt: 'DESC' }, take: 50 }),
-      NotificationDispatch.find({ order: { executedAt: 'DESC' }, take: 100 }),
-      AutoMessage.find(),
-      OutboundMessage.count({ where: { status: 'PENDING' } }),
-      panelConversationsService.list(req, 5),
+      WhatsappGroup.find({ where: { ownerPhoneNumber, isMember: true } }),
+      NotificationSchedule.find({ where: { ownerPhoneNumber } }),
+      IncidentReport.find({ where: { ownerPhoneNumber }, order: { receivedAt: 'DESC' }, take: 50 }),
+      NotificationDispatch.find({ where: { ownerPhoneNumber }, order: { executedAt: 'DESC' }, take: 100 }),
+      AutoMessage.find({ where: { ownerPhoneNumber } }),
+      OutboundMessage.count({ where: { ownerPhoneNumber, status: 'PENDING' } }),
+      panelConversationsService.list(req, ownerPhoneNumber, 5),
     ])
 
     const now = Date.now()

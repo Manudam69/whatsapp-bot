@@ -27,26 +27,27 @@ async function assignImage(message: AutoMessage, imageId?: string | null) {
     return
   }
 
-  message.image = imageId ? await mediaAssetService.findById(imageId) : null
+  message.image = imageId ? await mediaAssetService.findById(message.ownerPhoneNumber, imageId) : null
 }
 
 export const autoMessageService = {
-  async list() {
-    return AutoMessage.find({ order: { createdAt: 'DESC' } })
+  async list(ownerPhoneNumber: string) {
+    return AutoMessage.find({ where: { ownerPhoneNumber }, order: { createdAt: 'DESC' } })
   },
 
-  async findById(id: string) {
-    const message = await AutoMessage.findOne({ where: { id } })
+  async findById(ownerPhoneNumber: string, id: string) {
+    const message = await AutoMessage.findOne({ where: { id, ownerPhoneNumber } })
     if (!message) {
       throw NotFound('Mensaje no encontrado.')
     }
     return message
   },
 
-  async create(input: AutoMessageInput) {
+  async create(ownerPhoneNumber: string, input: AutoMessageInput) {
     validate(input)
 
     const message = AutoMessage.create({
+      ownerPhoneNumber,
       name: input.name.trim(),
       content: input.content.trim(),
       type: input.type,
@@ -58,8 +59,8 @@ export const autoMessageService = {
     return message
   },
 
-  async update(id: string, input: Partial<AutoMessageInput>) {
-    const message = await this.findById(id)
+  async update(ownerPhoneNumber: string, id: string, input: Partial<AutoMessageInput>) {
+    const message = await this.findById(ownerPhoneNumber, id)
 
     if (input.name !== undefined) {
       message.name = input.name.trim()
@@ -88,8 +89,8 @@ export const autoMessageService = {
     return message
   },
 
-  async remove(id: string) {
-    const message = await this.findById(id)
+  async remove(ownerPhoneNumber: string, id: string) {
+    const message = await this.findById(ownerPhoneNumber, id)
     await message.remove()
     return { success: true }
   },

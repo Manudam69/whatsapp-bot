@@ -22,7 +22,7 @@ async function bootstrap() {
   await AppDataSource.initialize()
   logger.info('Database connection established')
 
-  if (!config.DB.SYNCHRONIZE && AppDataSource.migrations.length > 0) {
+  if (AppDataSource.migrations.length > 0) {
     await AppDataSource.runMigrations()
     logger.info('Database migrations executed')
   }

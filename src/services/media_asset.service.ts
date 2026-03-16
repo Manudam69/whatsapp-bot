@@ -14,7 +14,7 @@ export type MediaAssetInput = {
 }
 
 export const mediaAssetService = {
-  async create(input: MediaAssetInput) {
+  async create(ownerPhoneNumber: string, input: MediaAssetInput) {
     if (!input.name.trim()) {
       throw BadRequest('El nombre del recurso es obligatorio.')
     }
@@ -22,6 +22,7 @@ export const mediaAssetService = {
     const normalizedPath = input.filePath.replace(/\\/g, '/')
 
     return MediaAsset.save({
+      ownerPhoneNumber,
       name: input.name.trim(),
       category: input.category?.trim(),
       fileName: input.fileName,
@@ -31,12 +32,12 @@ export const mediaAssetService = {
     })
   },
 
-  async list() {
-    return MediaAsset.find({ order: { createdAt: 'DESC' } })
+  async list(ownerPhoneNumber: string) {
+    return MediaAsset.find({ where: { ownerPhoneNumber }, order: { createdAt: 'DESC' } })
   },
 
-  async update(id: string, payload: Partial<Pick<MediaAsset, 'name' | 'category' | 'isActive'>>) {
-    const asset = await MediaAsset.findOne({ where: { id } })
+  async update(ownerPhoneNumber: string, id: string, payload: Partial<Pick<MediaAsset, 'name' | 'category' | 'isActive'>>) {
+    const asset = await MediaAsset.findOne({ where: { id, ownerPhoneNumber } })
     if (!asset) {
       throw NotFound('Recurso multimedia no encontrado.')
     }
@@ -55,16 +56,16 @@ export const mediaAssetService = {
     return asset
   },
 
-  async findById(id: string) {
-    const asset = await MediaAsset.findOne({ where: { id } })
+  async findById(ownerPhoneNumber: string, id: string) {
+    const asset = await MediaAsset.findOne({ where: { id, ownerPhoneNumber } })
     if (!asset) {
       throw NotFound('Recurso multimedia no encontrado.')
     }
     return asset
   },
 
-  async remove(id: string) {
-    const asset = await this.findById(id)
+  async remove(ownerPhoneNumber: string, id: string) {
+    const asset = await this.findById(ownerPhoneNumber, id)
 
     await AppDataSource.query('UPDATE auto_messages SET image_id = NULL WHERE image_id = $1', [asset.id])
     await AppDataSource.query('UPDATE notification_schedules SET media_asset_id = NULL WHERE media_asset_id = $1', [asset.id])

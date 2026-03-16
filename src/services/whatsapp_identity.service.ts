@@ -5,11 +5,7 @@ import { InboundMessage } from '@/entities/inbound_message.entity'
 import { AppDataSource } from '@/database/datasource'
 import { config } from '@/config'
 import logger from '@/utils/logger'
-
-function normalizeNumericId(value: string) {
-  const digits = value.replace(/\D/g, '')
-  return digits || value.trim()
-}
+import { normalizePhoneNumber } from '@/utils/phone'
 
 function readMappingValue(filePath: string) {
   try {
@@ -19,7 +15,7 @@ function readMappingValue(filePath: string) {
     }
 
     const parsed = JSON.parse(raw)
-    return typeof parsed === 'string' ? normalizeNumericId(parsed) : undefined
+    return typeof parsed === 'string' ? normalizePhoneNumber(parsed) : undefined
   } catch (error) {
     logger.warn(`Failed to read WhatsApp LID mapping file ${path.basename(filePath)}: ${error instanceof Error ? error.message : String(error)}`)
     return undefined
@@ -51,7 +47,7 @@ class WhatsappIdentityService {
     }
 
     if (domain !== 'lid') {
-      return normalizeNumericId(localPart)
+      return normalizePhoneNumber(localPart)
     }
 
     this.loadMappings()
@@ -65,10 +61,10 @@ class WhatsappIdentityService {
     return this.byLid.get(localPart) || localPart
   }
 
-  async upsertContactFromInbound(jid: string, contactName?: string, rawPayload?: Record<string, unknown>) {
+  async upsertContactFromInbound(ownerPhoneNumber: string, jid: string, contactName?: string, rawPayload?: Record<string, unknown>) {
     const phoneNumber = this.resolvePhoneNumber(jid, rawPayload)
-    const existingByJid = await ClientContact.findOne({ where: { whatsappJid: jid } })
-    const existingByPhone = phoneNumber ? await ClientContact.findOne({ where: { phoneNumber } }) : null
+    const existingByJid = await ClientContact.findOne({ where: { ownerPhoneNumber, whatsappJid: jid } })
+    const existingByPhone = phoneNumber ? await ClientContact.findOne({ where: { ownerPhoneNumber, phoneNumber } }) : null
 
     if (existingByJid && existingByPhone && existingByJid.id !== existingByPhone.id) {
       return this.mergeContacts(existingByJid, existingByPhone, jid, phoneNumber, contactName)
@@ -76,6 +72,7 @@ class WhatsappIdentityService {
 
     const contact = existingByJid || existingByPhone
     if (contact) {
+      contact.ownerPhoneNumber = ownerPhoneNumber
       contact.phoneNumber = phoneNumber
       contact.whatsappJid = jid
       contact.contactName = contactName || contact.contactName
@@ -85,6 +82,7 @@ class WhatsappIdentityService {
     }
 
     const created = ClientContact.create({
+      ownerPhoneNumber,
       phoneNumber,
       whatsappJid: jid,
       contactName,
@@ -96,8 +94,12 @@ class WhatsappIdentityService {
     return created
   }
 
-  async repairStoredContacts() {
-    const contacts = await ClientContact.find()
+  async repairStoredContacts(ownerPhoneNumber: string) {
+    if (!ownerPhoneNumber) {
+      return 0
+    }
+
+    const contacts = await ClientContact.find({ where: { ownerPhoneNumber } })
     let repairedCount = 0
     let unresolvedCount = 0
 
@@ -111,7 +113,7 @@ class WhatsappIdentityService {
         continue
       }
 
-      const duplicate = await ClientContact.findOne({ where: { phoneNumber: resolvedPhoneNumber } })
+      const duplicate = await ClientContact.findOne({ where: { ownerPhoneNumber, phoneNumber: resolvedPhoneNumber } })
       if (duplicate && duplicate.id !== contact.id) {
         await this.mergeContacts(contact, duplicate, contact.whatsappJid, resolvedPhoneNumber, contact.contactName)
       } else {
@@ -206,14 +208,14 @@ class WhatsappIdentityService {
       }
 
       if (baseName.endsWith('_reverse')) {
-        const lid = normalizeNumericId(baseName.slice(0, -'_reverse'.length))
+        const lid = normalizePhoneNumber(baseName.slice(0, -'_reverse'.length))
         const phone = value
         this.byLid.set(lid, phone)
         this.byPhone.set(phone, lid)
         continue
       }
 
-      const phone = normalizeNumericId(baseName)
+      const phone = normalizePhoneNumber(baseName)
       const lid = value
       this.byPhone.set(phone, lid)
       this.byLid.set(lid, phone)
@@ -227,6 +229,7 @@ class WhatsappIdentityService {
       await manager.query('UPDATE inbound_messages SET contact_id = $1 WHERE contact_id = $2', [primary.id, secondary.id])
       await manager.query('UPDATE incident_reports SET contact_id = $1 WHERE contact_id = $2', [primary.id, secondary.id])
 
+      primary.ownerPhoneNumber = primary.ownerPhoneNumber || secondary.ownerPhoneNumber
       primary.phoneNumber = phoneNumber
       primary.whatsappJid = jid
       primary.contactName = contactName || primary.contactName || secondary.contactName

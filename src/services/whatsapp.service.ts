@@ -13,6 +13,7 @@ import logger from '@/utils/logger'
 import { inboundMessageService } from './inbound_message.service'
 import { groupService } from './group.service'
 import { whatsappIdentityService } from './whatsapp_identity.service'
+import { getPhoneNumberFromJid } from '@/utils/phone'
 
 function createSilentBaileysLogger() {
   const silentLogger = {
@@ -39,6 +40,7 @@ type SessionState = {
   status: 'idle' | 'connecting' | 'qr' | 'connected' | 'disconnected'
   qr?: string
   connectedAt?: Date
+  phoneNumber?: string
 }
 
 class WhatsappService {
@@ -85,9 +87,10 @@ class WhatsappService {
         }
 
         if (connection === 'open') {
-          this.state = { status: 'connected', connectedAt: new Date() }
+          const phoneNumber = getPhoneNumberFromJid(this.socket?.user?.id)
+          this.state = { status: 'connected', connectedAt: new Date(), phoneNumber }
           logger.info('WhatsApp connection established')
-          await whatsappIdentityService.repairStoredContacts()
+          await whatsappIdentityService.repairStoredContacts(phoneNumber)
           await this.scheduleInitialGroupSync()
           const { outboundMessageService } = await import('./outbound_message.service')
           await outboundMessageService.flushPending()
@@ -160,6 +163,10 @@ class WhatsappService {
     return Boolean(this.socket) && this.state.status === 'connected'
   }
 
+  getConnectedPhoneNumber() {
+    return this.isConnected() ? this.state.phoneNumber || '' : ''
+  }
+
   async sendText(jid: string, text: string) {
     await this.sendTextNow(jid, text)
   }
@@ -188,7 +195,8 @@ class WhatsappService {
   }
 
   async syncGroups() {
-    if (!this.socket || !this.isConnected()) {
+    const ownerPhoneNumber = this.getConnectedPhoneNumber()
+    if (!this.socket || !ownerPhoneNumber) {
       return []
     }
 
@@ -205,7 +213,7 @@ class WhatsappService {
         name: group.subject,
         participantCount: group.participants.length,
       }))
-      const syncedGroups = await groupService.upsertGroups(mapped)
+      const syncedGroups = await groupService.upsertGroups(ownerPhoneNumber, mapped)
       this.scheduleGroupSync(GROUP_SYNC_INTERVAL_MS)
       return syncedGroups
     } catch (error) {
@@ -226,7 +234,12 @@ class WhatsappService {
   }
 
   private async scheduleInitialGroupSync() {
-    const latestSyncAt = await groupService.getLatestSyncAt()
+    const ownerPhoneNumber = this.getConnectedPhoneNumber()
+    if (!ownerPhoneNumber) {
+      return
+    }
+
+    const latestSyncAt = await groupService.getLatestSyncAt(ownerPhoneNumber)
     if (!latestSyncAt) {
       this.scheduleGroupSync()
       return

@@ -6,6 +6,9 @@ export type DispatchStatus = 'PENDING' | 'SENT' | 'FAILED'
 
 @Entity({ name: 'notification_dispatches' })
 export class NotificationDispatch extends EntityBase {
+  @Column({ name: 'owner_phone_number' })
+  ownerPhoneNumber: string
+
   @ManyToOne(() => NotificationSchedule, { eager: true, nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'schedule_id' })
   schedule?: NotificationSchedule | null

@@ -6,6 +6,9 @@ export type ReportStatus = 'RECEIVED' | 'QUEUED' | 'FORWARDED' | 'FAILED'
 
 @Entity({ name: 'incident_reports' })
 export class IncidentReport extends EntityBase {
+  @Column({ name: 'owner_phone_number' })
+  ownerPhoneNumber: string
+
   @Column({ unique: true })
   folio: string
 

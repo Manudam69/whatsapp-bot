@@ -63,6 +63,7 @@ export function formatReportStatusNotification(report: IncidentReport) {
 export const reportService = {
   async createFromInbound(contact: ClientContact, parsed: ParsedIncidentReport, sourceMessage: string) {
     const report = IncidentReport.create({
+      ownerPhoneNumber: contact.ownerPhoneNumber,
       folio: buildFolio(),
       contact,
       serviceName: parsed.serviceName,
@@ -85,7 +86,7 @@ export const reportService = {
     report.status = 'FORWARDED'
     report.forwardedAt = new Date()
     report.forwardedGroupJid = groupJid
-    report.forwardedGroupName = (await groupService.resolveGroupName(groupJid)) || undefined
+    report.forwardedGroupName = (await groupService.resolveGroupName(report.ownerPhoneNumber, groupJid)) || undefined
     await report.save()
     return report
   },
@@ -93,7 +94,7 @@ export const reportService = {
   async markQueued(report: IncidentReport, groupJid: string) {
     report.status = 'QUEUED'
     report.forwardedGroupJid = groupJid
-    report.forwardedGroupName = (await groupService.resolveGroupName(groupJid)) || undefined
+    report.forwardedGroupName = (await groupService.resolveGroupName(report.ownerPhoneNumber, groupJid)) || undefined
     await report.save()
     return report
   },
@@ -105,16 +106,16 @@ export const reportService = {
     return report
   },
 
-  async list() {
-    return IncidentReport.find({ order: { receivedAt: 'DESC' }, take: 100 })
+  async list(ownerPhoneNumber: string) {
+    return IncidentReport.find({ where: { ownerPhoneNumber }, order: { receivedAt: 'DESC' }, take: 100 })
   },
 
-  async findById(id: string) {
-    return IncidentReport.findOne({ where: { id } })
+  async findById(ownerPhoneNumber: string, id: string) {
+    return IncidentReport.findOne({ where: { id, ownerPhoneNumber } })
   },
 
-  async setReviewStatus(id: string, reviewStatus: IncidentReport['reviewStatus']) {
-    const report = await this.findById(id)
+  async setReviewStatus(ownerPhoneNumber: string, id: string, reviewStatus: IncidentReport['reviewStatus']) {
+    const report = await this.findById(ownerPhoneNumber, id)
     if (!report) {
       throw NotFound('Reporte no encontrado.')
     }

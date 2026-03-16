@@ -75,8 +75,8 @@ function outboundStatus(message: OutboundMessage): ConversationMessageStatus {
 }
 
 export const panelConversationsService = {
-  async list(req: Request, limit?: number) {
-    const contacts = await ClientContact.find({ order: { updatedAt: 'DESC' } })
+  async list(req: Request, ownerPhoneNumber: string, limit?: number) {
+    const contacts = await ClientContact.find({ where: { ownerPhoneNumber }, order: { updatedAt: 'DESC' } })
 
     if (contacts.length === 0) {
       return []
@@ -91,7 +91,7 @@ export const panelConversationsService = {
         order: { receivedAt: 'DESC', createdAt: 'DESC' },
       }),
       OutboundMessage.find({
-        where: { recipientJid: In(contactJids) },
+        where: { ownerPhoneNumber, recipientJid: In(contactJids) },
         order: { sentAt: 'DESC', lastAttemptAt: 'DESC', createdAt: 'DESC' },
       }),
     ])
@@ -145,8 +145,8 @@ export const panelConversationsService = {
     return typeof limit === 'number' ? conversations.slice(0, limit) : conversations
   },
 
-  async getByContactId(req: Request, contactId: string) {
-    const contact = await ClientContact.findOne({ where: { id: contactId } })
+  async getByContactId(req: Request, ownerPhoneNumber: string, contactId: string) {
+    const contact = await ClientContact.findOne({ where: { id: contactId, ownerPhoneNumber } })
     if (!contact) {
       throw NotFound('Conversación no encontrada.')
     }
@@ -157,7 +157,7 @@ export const panelConversationsService = {
         order: { receivedAt: 'ASC', createdAt: 'ASC' },
       }),
       OutboundMessage.find({
-        where: { recipientJid: contact.whatsappJid },
+        where: { ownerPhoneNumber, recipientJid: contact.whatsappJid },
         order: { sentAt: 'ASC', lastAttemptAt: 'ASC', createdAt: 'ASC' },
       }),
     ])

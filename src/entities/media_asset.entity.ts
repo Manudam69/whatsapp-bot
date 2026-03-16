@@ -3,6 +3,9 @@ import { EntityBase } from './entity.base'
 
 @Entity({ name: 'media_assets' })
 export class MediaAsset extends EntityBase {
+  @Column({ name: 'owner_phone_number' })
+  ownerPhoneNumber: string
+
   @Column()
   name: string
 

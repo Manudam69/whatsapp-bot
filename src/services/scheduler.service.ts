@@ -8,9 +8,11 @@ import { outboundMessageService } from './outbound_message.service'
 import { getTimeParts } from '@/utils/time'
 import { sleep } from '@/utils/sleep'
 import logger from '@/utils/logger'
+import { sessionOwnerService } from './session_owner.service'
 
 async function dispatchSchedule(schedule: NotificationSchedule, executionKey: string) {
-  const activeGroupJids = Array.from(new Set(await groupService.resolveGroupJids(schedule.groupJids, { activeOnly: true })))
+  const ownerPhoneNumber = schedule.ownerPhoneNumber
+  const activeGroupJids = Array.from(new Set(await groupService.resolveGroupJids(ownerPhoneNumber, schedule.groupJids, { activeOnly: true })))
 
   if (activeGroupJids.length !== schedule.groupJids.length) {
     schedule.groupJids = activeGroupJids
@@ -26,9 +28,10 @@ async function dispatchSchedule(schedule: NotificationSchedule, executionKey: st
 
   for (const groupJid of activeGroupJids) {
     const dispatch = await NotificationDispatch.save({
+      ownerPhoneNumber,
       schedule,
       groupJid,
-      groupName: (await groupService.resolveGroupName(groupJid)) || undefined,
+      groupName: (await groupService.resolveGroupName(ownerPhoneNumber, groupJid)) || undefined,
       status: 'PENDING',
       attempts: 0,
       executedAt: new Date(),
@@ -39,6 +42,7 @@ async function dispatchSchedule(schedule: NotificationSchedule, executionKey: st
 
     if (schedule.mediaAsset?.filePath) {
       await outboundMessageService.queueMedia({
+        ownerPhoneNumber,
         recipientJid: groupJid,
         filePath: path.resolve(config.PROJECT_ROOT, schedule.mediaAsset.filePath),
         caption: schedule.messageText,
@@ -50,6 +54,7 @@ async function dispatchSchedule(schedule: NotificationSchedule, executionKey: st
       })
     } else if (schedule.messageText) {
       await outboundMessageService.queueText({
+        ownerPhoneNumber,
         recipientJid: groupJid,
         text: schedule.messageText,
         sourceType: 'SCHEDULE',
@@ -74,9 +79,14 @@ export const schedulerService = {
     cron.schedule(
       '*/1 * * * *',
       async () => {
+        const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
+        if (!ownerPhoneNumber) {
+          return
+        }
+
         const now = getTimeParts(config.SCHEDULE_TIME_ZONE)
         const executionKey = `${now.dateKey}-${now.minuteKey}`
-        const schedules = await NotificationSchedule.find({ where: { isActive: true } })
+        const schedules = await NotificationSchedule.find({ where: { isActive: true, ownerPhoneNumber } })
 
         for (const schedule of schedules) {
           const matchesDay = schedule.daysOfWeek.includes(now.weekday)

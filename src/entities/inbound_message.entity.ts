@@ -5,6 +5,9 @@ import { ClientContact } from './client_contact.entity'
 @Index('IDX_inbound_messages_external_message_id', ['externalMessageId'], { unique: true })
 @Entity({ name: 'inbound_messages' })
 export class InboundMessage extends EntityBase {
+  @Column({ name: 'owner_phone_number' })
+  ownerPhoneNumber: string
+
   @ManyToOne(() => ClientContact, (contact) => contact.inboundMessages, { eager: true, nullable: false })
   @JoinColumn({ name: 'contact_id' })
   contact: ClientContact

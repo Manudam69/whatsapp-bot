@@ -7,6 +7,9 @@ export type OutboundMessageSource = 'FLOW_REPLY' | 'REPORT_FORWARD' | 'REPORT_ST
 
 @Entity({ name: 'outbound_messages' })
 export class OutboundMessage extends EntityBase {
+  @Column({ name: 'owner_phone_number' })
+  ownerPhoneNumber: string
+
   @Column({ name: 'recipient_jid' })
   recipientJid: string
 

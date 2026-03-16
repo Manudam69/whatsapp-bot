@@ -1,4 +1,4 @@
-import { Column, Entity, OneToMany } from 'typeorm'
+import { Column, Entity, Index, OneToMany } from 'typeorm'
 import { EntityBase } from './entity.base'
 import { InboundMessage } from './inbound_message.entity'
 import { IncidentReport } from './incident_report.entity'
@@ -13,11 +13,17 @@ export type ContactFlowState =
   | 'AWAITING_CONFIRMATION'
 
 @Entity({ name: 'client_contacts' })
+@Index('IDX_client_contacts_owner_phone_number', ['ownerPhoneNumber'])
+@Index('UQ_client_contacts_owner_phone', ['ownerPhoneNumber', 'phoneNumber'], { unique: true })
+@Index('UQ_client_contacts_owner_jid', ['ownerPhoneNumber', 'whatsappJid'], { unique: true })
 export class ClientContact extends EntityBase {
-  @Column({ name: 'phone_number', unique: true })
+  @Column({ name: 'owner_phone_number' })
+  ownerPhoneNumber: string
+
+  @Column({ name: 'phone_number' })
   phoneNumber: string
 
-  @Column({ name: 'whatsapp_jid', unique: true })
+  @Column({ name: 'whatsapp_jid' })
   whatsappJid: string
 
   @Column({ name: 'contact_name', nullable: true })

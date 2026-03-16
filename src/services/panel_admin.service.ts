@@ -10,6 +10,19 @@ import { NotificationDispatch } from '@/entities/notification_dispatch.entity'
 import { NotificationSchedule } from '@/entities/notification_schedule.entity'
 import { WhatsappGroup } from '@/entities/whatsapp_group.entity'
 
+type BotSettingsShape = Pick<BotConfiguration,
+  | 'reportKeyword'
+  | 'retryAttempts'
+  | 'retryDelayMs'
+  | 'dispatchWindowMinutes'
+  | 'concurrencyLimit'
+  | 'operationalGroupId'
+  | 'firstReplyText'
+  | 'firstReplyEnabled'
+  | 'confirmationEnabled'
+  | 'strategy'
+>
+
 const dayNameToNumber = {
   sunday: 0,
   monday: 1,
@@ -155,7 +168,7 @@ export const panelAdminService = {
     }
   },
 
-  mapBotSettings(settings: BotConfiguration) {
+  mapBotSettings(settings: BotSettingsShape) {
     return {
       reportKeyword: settings.reportKeyword,
       retryAttempts: settings.retryAttempts,
@@ -170,10 +183,10 @@ export const panelAdminService = {
     }
   },
 
-  mapSession(state: { status: 'idle' | 'connecting' | 'qr' | 'connected' | 'disconnected'; qr?: string; connectedAt?: Date }) {
+  mapSession(state: { status: 'idle' | 'connecting' | 'qr' | 'connected' | 'disconnected'; qr?: string; connectedAt?: Date; phoneNumber?: string }) {
     return {
       id: 'main-session',
-      phoneNumber: 'Sesion WhatsApp',
+      phoneNumber: state.phoneNumber || '',
       status: state.status === 'connected' ? 'connected' : state.status === 'qr' ? 'qr_pending' : 'disconnected',
       connectedAt: formatDate(state.connectedAt),
       qrCode: state.qr,

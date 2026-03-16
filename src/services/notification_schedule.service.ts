@@ -40,14 +40,15 @@ async function assignMedia(schedule: NotificationSchedule, mediaAssetId?: string
     return
   }
 
-  schedule.mediaAsset = mediaAssetId ? await mediaAssetService.findById(mediaAssetId) : null
+  schedule.mediaAsset = mediaAssetId ? await mediaAssetService.findById(schedule.ownerPhoneNumber, mediaAssetId) : null
 }
 
 export const notificationScheduleService = {
-  async create(input: ScheduleInput) {
+  async create(ownerPhoneNumber: string, input: ScheduleInput) {
     validate(input)
 
     const schedule = NotificationSchedule.create({
+      ownerPhoneNumber,
       name: input.name.trim(),
       messageText: input.messageText?.trim(),
       daysOfWeek: input.daysOfWeek,
@@ -64,8 +65,8 @@ export const notificationScheduleService = {
     return schedule
   },
 
-  async update(id: string, input: Partial<ScheduleInput>) {
-    const schedule = await NotificationSchedule.findOne({ where: { id } })
+  async update(ownerPhoneNumber: string, id: string, input: Partial<ScheduleInput>) {
+    const schedule = await NotificationSchedule.findOne({ where: { id, ownerPhoneNumber } })
     if (!schedule) {
       throw NotFound('Programación no encontrada.')
     }
@@ -115,24 +116,24 @@ export const notificationScheduleService = {
     return schedule
   },
 
-  async list() {
-    return NotificationSchedule.find({ order: { createdAt: 'DESC' } })
+  async list(ownerPhoneNumber: string) {
+    return NotificationSchedule.find({ where: { ownerPhoneNumber }, order: { createdAt: 'DESC' } })
   },
 
-  async findById(id: string) {
-    const schedule = await NotificationSchedule.findOne({ where: { id } })
+  async findById(ownerPhoneNumber: string, id: string) {
+    const schedule = await NotificationSchedule.findOne({ where: { id, ownerPhoneNumber } })
     if (!schedule) {
       throw NotFound('Programación no encontrada.')
     }
     return schedule
   },
 
-  async listDispatchHistory(limit = 100) {
-    return NotificationDispatch.find({ order: { executedAt: 'DESC' }, take: limit })
+  async listDispatchHistory(ownerPhoneNumber: string, limit = 100) {
+    return NotificationDispatch.find({ where: { ownerPhoneNumber }, order: { executedAt: 'DESC' }, take: limit })
   },
 
-  async remove(id: string) {
-    const schedule = await this.findById(id)
+  async remove(ownerPhoneNumber: string, id: string) {
+    const schedule = await this.findById(ownerPhoneNumber, id)
     await schedule.remove()
     return { success: true }
   },

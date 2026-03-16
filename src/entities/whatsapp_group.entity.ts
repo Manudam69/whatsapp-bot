@@ -1,9 +1,14 @@
-import { Column, Entity } from 'typeorm'
+import { Column, Entity, Index } from 'typeorm'
 import { EntityBase } from './entity.base'
 
 @Entity({ name: 'whatsapp_groups' })
+@Index('IDX_whatsapp_groups_owner_phone_number', ['ownerPhoneNumber'])
+@Index('UQ_whatsapp_groups_owner_jid', ['ownerPhoneNumber', 'jid'], { unique: true })
 export class WhatsappGroup extends EntityBase {
-  @Column({ unique: true })
+  @Column({ name: 'owner_phone_number' })
+  ownerPhoneNumber: string
+
+  @Column()
   jid: string
 
   @Column()

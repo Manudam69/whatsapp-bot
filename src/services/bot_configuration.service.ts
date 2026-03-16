@@ -18,31 +18,37 @@ type BotConfigurationInput = Partial<Pick<
 
 const defaultFirstReply = 'Gracias por tu mensaje. Tu reporte fue recibido y enviado al grupo operativo para seguimiento.'
 
+function buildDefaultSettings(ownerPhoneNumber: string) {
+  return BotConfiguration.create({
+    ownerPhoneNumber,
+    reportKeyword: 'REPORTE',
+    retryAttempts: config.MAX_SEND_RETRIES,
+    retryDelayMs: 2000,
+    dispatchWindowMinutes: 12,
+    concurrencyLimit: 18,
+    operationalGroupId: undefined,
+    firstReplyText: defaultFirstReply,
+    firstReplyEnabled: true,
+    confirmationEnabled: true,
+    strategy: 'hybrid-automation',
+  })
+}
+
 export const botConfigurationService = {
-  async get() {
-    const [settingsRecord] = await BotConfiguration.find({
-      order: { createdAt: 'ASC' },
-      take: 1,
-    })
+  buildDefaults(ownerPhoneNumber = '') {
+    return buildDefaultSettings(ownerPhoneNumber)
+  },
+
+  async get(ownerPhoneNumber: string) {
+    const settingsRecord = await BotConfiguration.findOne({ where: { ownerPhoneNumber } })
 
     let settings = settingsRecord
     if (!settings) {
-      settings = await BotConfiguration.save({
-        reportKeyword: 'REPORTE',
-        retryAttempts: config.MAX_SEND_RETRIES,
-        retryDelayMs: 2000,
-        dispatchWindowMinutes: 12,
-        concurrencyLimit: 18,
-        operationalGroupId: undefined,
-        firstReplyText: defaultFirstReply,
-        firstReplyEnabled: true,
-        confirmationEnabled: true,
-        strategy: 'hybrid-automation',
-      })
+      settings = await buildDefaultSettings(ownerPhoneNumber).save()
     }
 
     if (settings.operationalGroupId) {
-      const activeOperationalGroupId = await groupService.resolveGroupJid(settings.operationalGroupId, { activeOnly: true })
+      const activeOperationalGroupId = await groupService.resolveGroupJid(ownerPhoneNumber, settings.operationalGroupId, { activeOnly: true })
       if (!activeOperationalGroupId) {
         settings.operationalGroupId = ''
         await settings.save()
@@ -52,11 +58,13 @@ export const botConfigurationService = {
     return settings
   },
 
-  async update(input: BotConfigurationInput) {
-    const settings = await this.get()
+  async update(ownerPhoneNumber: string, input: BotConfigurationInput) {
+    const settings = await this.get(ownerPhoneNumber)
 
     if (input.operationalGroupId !== undefined) {
-      input.operationalGroupId = input.operationalGroupId ? (await groupService.resolveGroupJid(input.operationalGroupId, { activeOnly: true })) || '' : ''
+      input.operationalGroupId = input.operationalGroupId
+        ? (await groupService.resolveGroupJid(ownerPhoneNumber, input.operationalGroupId, { activeOnly: true })) || ''
+        : ''
     }
 
     Object.assign(settings, input)

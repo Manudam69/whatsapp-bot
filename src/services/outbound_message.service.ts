@@ -5,8 +5,10 @@ import { reportService } from './report.service'
 import { sleep } from '@/utils/sleep'
 import logger from '@/utils/logger'
 import { whatsappService } from './whatsapp.service'
+import { sessionOwnerService } from './session_owner.service'
 
 type BaseQueueInput = {
+  ownerPhoneNumber?: string
   recipientJid: string
   sourceType: OutboundMessageSource
   sourceId?: string
@@ -40,8 +42,14 @@ function normalizeDelay(value?: number) {
 class OutboundMessageService {
   private flushPromise?: Promise<void>
 
+  private resolveOwnerPhoneNumber(ownerPhoneNumber?: string) {
+    return ownerPhoneNumber || sessionOwnerService.requireActiveOwnerPhoneNumber()
+  }
+
   async queueText(input: QueueTextInput) {
+    const ownerPhoneNumber = this.resolveOwnerPhoneNumber(input.ownerPhoneNumber)
     const message = OutboundMessage.create({
+      ownerPhoneNumber,
       recipientJid: input.recipientJid,
       messageType: 'TEXT',
       messageText: input.text,
@@ -59,7 +67,9 @@ class OutboundMessageService {
   }
 
   async queueMedia(input: QueueMediaInput) {
+    const ownerPhoneNumber = this.resolveOwnerPhoneNumber(input.ownerPhoneNumber)
     const message = OutboundMessage.create({
+      ownerPhoneNumber,
       recipientJid: input.recipientJid,
       messageType: 'IMAGE',
       mediaFilePath: input.filePath,
@@ -90,12 +100,13 @@ class OutboundMessageService {
   }
 
   private async runFlush() {
-    if (!whatsappService.isConnected()) {
+    const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
+    if (!whatsappService.isConnected() || !ownerPhoneNumber) {
       return
     }
 
     const pending = await OutboundMessage.find({
-      where: { status: 'PENDING' },
+      where: { status: 'PENDING', ownerPhoneNumber },
       order: { createdAt: 'ASC' },
     })
 
@@ -158,7 +169,7 @@ class OutboundMessageService {
 
   private async afterDelivery(message: OutboundMessage) {
     if (message.sourceType === 'REPORT_FORWARD' && message.sourceId) {
-      const report = await reportService.findById(message.sourceId)
+      const report = await reportService.findById(message.ownerPhoneNumber, message.sourceId)
       const groupJid = typeof message.metadata?.groupJid === 'string' ? message.metadata.groupJid : undefined
 
       if (report && groupJid) {
@@ -173,7 +184,7 @@ class OutboundMessageService {
 
   private async afterFailure(message: OutboundMessage) {
     if (message.sourceType === 'REPORT_FORWARD' && message.sourceId) {
-      const report = await reportService.findById(message.sourceId)
+      const report = await reportService.findById(message.ownerPhoneNumber, message.sourceId)
       const groupJid = typeof message.metadata?.groupJid === 'string' ? message.metadata.groupJid : undefined
 
       if (report) {

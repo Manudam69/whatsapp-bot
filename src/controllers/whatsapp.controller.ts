@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from 'express'
 import { groupService } from '@/services/group.service'
+import { sessionOwnerService } from '@/services/session_owner.service'
 import { whatsappService } from '@/services/whatsapp.service'
 
 export async function getSessionStatus(req: Request, res: Response, next: NextFunction) {
@@ -39,11 +40,17 @@ export async function resetSession(req: Request, res: Response, next: NextFuncti
 
 export async function listGroups(req: Request, res: Response, next: NextFunction) {
   try {
+    const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
+    if (!ownerPhoneNumber) {
+      res.json([])
+      return
+    }
+
     if (whatsappService.isConnected()) {
       await whatsappService.syncGroups()
     }
 
-    const groups = await groupService.list()
+    const groups = await groupService.list(ownerPhoneNumber)
     res.json(groups)
   } catch (error) {
     next(error)

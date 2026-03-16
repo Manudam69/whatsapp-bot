@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express'
 import { formatReportStatusNotification, reportService } from '@/services/report.service'
 import { panelAdminService } from '@/services/panel_admin.service'
 import { outboundMessageService } from '@/services/outbound_message.service'
+import { sessionOwnerService } from '@/services/session_owner.service'
 import logger from '@/utils/logger'
 import { IncidentReport } from '@/entities/incident_report.entity'
 
@@ -11,7 +12,13 @@ function isValidReviewStatus(value: string): value is IncidentReport['reviewStat
 
 export async function listReports(req: Request, res: Response, next: NextFunction) {
   try {
-    const reports = await reportService.list()
+    const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
+    if (!ownerPhoneNumber) {
+      res.json([])
+      return
+    }
+
+    const reports = await reportService.list(ownerPhoneNumber)
     res.json(reports.map((report) => panelAdminService.mapReport(req, report)))
   } catch (error) {
     next(error)
@@ -20,16 +27,18 @@ export async function listReports(req: Request, res: Response, next: NextFunctio
 
 export async function updateReport(req: Request, res: Response, next: NextFunction) {
   try {
+    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
     const reportId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
     const requestedStatus = String(req.body?.status || 'pending')
     const status: IncidentReport['reviewStatus'] = isValidReviewStatus(requestedStatus) ? requestedStatus : 'pending'
-    const report = await reportService.setReviewStatus(reportId, status)
+    const report = await reportService.setReviewStatus(ownerPhoneNumber, reportId, status)
 
     const notification = formatReportStatusNotification(report)
 
     if (notification && report.contact?.whatsappJid) {
       try {
         await outboundMessageService.queueText({
+          ownerPhoneNumber,
           recipientJid: report.contact.whatsappJid,
           text: notification,
           sourceType: 'REPORT_STATUS_UPDATE',

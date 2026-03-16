@@ -1,10 +1,14 @@
-import { Column, Entity } from 'typeorm'
+import { Column, Entity, Index } from 'typeorm'
 import { EntityBase } from './entity.base'
 
 export type BotStrategy = 'official-api' | 'external-provider' | 'hybrid-automation'
 
 @Entity({ name: 'bot_configurations' })
+@Index('UQ_bot_configurations_owner_phone_number', ['ownerPhoneNumber'], { unique: true })
 export class BotConfiguration extends EntityBase {
+  @Column({ name: 'owner_phone_number' })
+  ownerPhoneNumber: string
+
   @Column({ name: 'report_keyword', default: 'REPORTE' })
   reportKeyword: string
 

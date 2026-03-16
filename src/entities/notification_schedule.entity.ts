@@ -4,6 +4,9 @@ import { MediaAsset } from './media_asset.entity'
 
 @Entity({ name: 'notification_schedules' })
 export class NotificationSchedule extends EntityBase {
+  @Column({ name: 'owner_phone_number' })
+  ownerPhoneNumber: string
+
   @Column()
   name: string
 
