@@ -10,7 +10,21 @@ import { sleep } from '@/utils/sleep'
 import logger from '@/utils/logger'
 
 async function dispatchSchedule(schedule: NotificationSchedule, executionKey: string) {
-  for (const groupJid of schedule.groupJids) {
+  const activeGroupJids = Array.from(new Set(await groupService.resolveGroupJids(schedule.groupJids, { activeOnly: true })))
+
+  if (activeGroupJids.length !== schedule.groupJids.length) {
+    schedule.groupJids = activeGroupJids
+  }
+
+  if (activeGroupJids.length === 0) {
+    schedule.isActive = false
+    schedule.lastExecutionKey = undefined
+    await schedule.save()
+    logger.warn(`Schedule ${schedule.id} was deactivated because all destination groups are inactive.`)
+    return
+  }
+
+  for (const groupJid of activeGroupJids) {
     const dispatch = await NotificationDispatch.save({
       schedule,
       groupJid,

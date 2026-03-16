@@ -6,7 +6,7 @@ import { notificationScheduleService } from '@/services/notification_schedule.se
 import { panelAdminService } from '@/services/panel_admin.service'
 
 async function normalizeMessageGroups(messageId: string, groupIds: string[]) {
-  const normalizedGroupIds = await groupService.resolveGroupJids(groupIds)
+  const normalizedGroupIds = await groupService.resolveGroupJids(groupIds, { activeOnly: true })
   const uniqueGroupIds = Array.from(new Set(normalizedGroupIds))
 
   if (uniqueGroupIds.length === groupIds.length && uniqueGroupIds.every((value, index) => value === groupIds[index])) {
@@ -32,7 +32,7 @@ export async function listMessages(req: Request, res: Response, next: NextFuncti
 
 export async function createMessage(req: Request, res: Response, next: NextFunction) {
   try {
-    const groupIds = await groupService.resolveGroupJids(Array.isArray(req.body?.groupIds) ? req.body.groupIds.map((value: unknown) => String(value)) : [])
+    const groupIds = await groupService.resolveGroupJids(Array.isArray(req.body?.groupIds) ? req.body.groupIds.map((value: unknown) => String(value)) : [], { activeOnly: true })
     const message = await autoMessageService.create({
       ...req.body,
       groupIds: Array.from(new Set(groupIds)),
@@ -48,7 +48,7 @@ export async function updateMessage(req: Request, res: Response, next: NextFunct
     const messageId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
     const groupIds = req.body?.groupIds === undefined
       ? undefined
-      : Array.from(new Set(await groupService.resolveGroupJids(Array.isArray(req.body.groupIds) ? req.body.groupIds.map((value: unknown) => String(value)) : [])))
+      : Array.from(new Set(await groupService.resolveGroupJids(Array.isArray(req.body.groupIds) ? req.body.groupIds.map((value: unknown) => String(value)) : [], { activeOnly: true })))
     const message = await autoMessageService.update(messageId, {
       ...req.body,
       groupIds,

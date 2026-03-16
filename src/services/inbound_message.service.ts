@@ -3,6 +3,7 @@ import { InboundMessage } from '@/entities/inbound_message.entity'
 import { ParsedIncidentReport } from './report_parser.service'
 import { outboundMessageService } from './outbound_message.service'
 import { botConfigurationService } from './bot_configuration.service'
+import { groupService } from './group.service'
 import { reportService, formatReportMessage } from './report.service'
 import { whatsappIdentityService } from './whatsapp_identity.service'
 import logger from '@/utils/logger'
@@ -182,7 +183,10 @@ export const inboundMessageService = {
 
     const report = await reportService.createFromInbound(contact, parsed, sourceMessage)
     const settings = await botConfigurationService.get()
-    const operationsGroupJid = settings.operationalGroupId || reportService.getOperationsGroupJid()
+    const configuredOperationsGroupJid = settings.operationalGroupId || reportService.getOperationsGroupJid()
+    const operationsGroupJid = configuredOperationsGroupJid
+      ? await groupService.resolveGroupJid(configuredOperationsGroupJid, { activeOnly: true })
+      : null
 
     try {
       if (!operationsGroupJid) {

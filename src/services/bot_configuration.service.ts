@@ -41,6 +41,14 @@ export const botConfigurationService = {
       })
     }
 
+    if (settings.operationalGroupId) {
+      const activeOperationalGroupId = await groupService.resolveGroupJid(settings.operationalGroupId, { activeOnly: true })
+      if (!activeOperationalGroupId) {
+        settings.operationalGroupId = ''
+        await settings.save()
+      }
+    }
+
     return settings
   },
 
@@ -48,7 +56,7 @@ export const botConfigurationService = {
     const settings = await this.get()
 
     if (input.operationalGroupId !== undefined) {
-      input.operationalGroupId = input.operationalGroupId ? (await groupService.resolveGroupJid(input.operationalGroupId)) || '' : ''
+      input.operationalGroupId = input.operationalGroupId ? (await groupService.resolveGroupJid(input.operationalGroupId, { activeOnly: true })) || '' : ''
     }
 
     Object.assign(settings, input)
