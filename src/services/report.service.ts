@@ -46,13 +46,26 @@ function fillStatusTemplate(template: string, report: IncidentReport) {
 export function formatReportStatusNotification(
   report: IncidentReport,
   settings: Pick<BotConfigurationSettings, 'reviewedReplyText' | 'resolvedReplyText'>,
+  resolutionDetails?: string,
 ) {
   if (report.reviewStatus === 'reviewed') {
     return fillStatusTemplate(settings.reviewedReplyText, report)
   }
 
   if (report.reviewStatus === 'resolved') {
-    return fillStatusTemplate(settings.resolvedReplyText, report)
+    const baseMessage = fillStatusTemplate(settings.resolvedReplyText, report)
+    const normalizedDetails = resolutionDetails?.trim()
+
+    if (!normalizedDetails) {
+      return baseMessage
+    }
+
+    return [
+      baseMessage,
+      '',
+      '*Resultado de la resolucion:*',
+      normalizedDetails,
+    ].join('\n')
   }
 
   return null

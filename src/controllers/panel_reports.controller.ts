@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from 'express'
 import { botConfigurationService } from '@/services/bot_configuration.service'
+import { BadRequest } from '@/middlewares/error_handler'
 import { formatReportStatusNotification, reportService } from '@/services/report.service'
 import { panelAdminService } from '@/services/panel_admin.service'
 import { outboundMessageService } from '@/services/outbound_message.service'
@@ -31,11 +32,16 @@ export async function updateReport(req: Request, res: Response, next: NextFuncti
     const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
     const reportId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
     const requestedStatus = String(req.body?.status || 'pending')
+    const resolutionDetails = typeof req.body?.resolutionDetails === 'string' ? req.body.resolutionDetails.trim() : ''
     const status: IncidentReport['reviewStatus'] = isValidReviewStatus(requestedStatus) ? requestedStatus : 'pending'
+    if (status === 'resolved' && !resolutionDetails) {
+      throw BadRequest('Debes capturar el detalle de la resolución para marcar el reporte como resuelto.')
+    }
+
     const report = await reportService.setReviewStatus(ownerPhoneNumber, reportId, status)
     const botSettings = await botConfigurationService.get(ownerPhoneNumber)
 
-    const notification = formatReportStatusNotification(report, botSettings)
+    const notification = formatReportStatusNotification(report, botSettings, resolutionDetails)
 
     if (notification && report.contact?.whatsappJid) {
       try {
