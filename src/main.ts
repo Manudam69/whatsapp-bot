@@ -8,7 +8,9 @@ import { config, validateConfig } from '@/config'
 import logger from '@/utils/logger'
 import { AppDataSource } from '@/database/datasource'
 import handleErrorMiddleware from '@/middlewares/error_handler'
+import { authenticate } from '@/middlewares/authenticate'
 import { initFileBasedRoutes } from '@/utils/file_routes'
+import { changePassword, login } from '@/controllers/auth.controller'
 import { authService } from '@/services/auth.service'
 import { schedulerService } from '@/services/scheduler.service'
 import { whatsappService } from '@/services/whatsapp.service'
@@ -44,6 +46,8 @@ async function bootstrap() {
   await authService.ensureDefaultAdminUser()
   logger.info(`Default admin ensured for ${config.AUTH.DEFAULT_ADMIN_EMAIL}`)
 
+  router.post('/auth/login', login)
+  router.put('/auth/change-password', authenticate, changePassword)
   await initFileBasedRoutes(router)
 
   app.use(morgan('[:date[iso]] (:status) ":method :url HTTP/:http-version" :response-time ms - [:res[content-length]]'))
