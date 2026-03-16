@@ -18,4 +18,7 @@ const storage = multer.diskStorage({
   },
 })
 
-export const uploadMediaMiddleware = multer({ storage })
+export const uploadMediaMiddleware = multer({
+  storage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+})
