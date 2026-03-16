@@ -1,6 +1,6 @@
 import { disconnectSession } from '@/controllers/panel_session.controller'
-import { authenticate } from '@/middlewares/authenticate'
+import { authenticate, requireAdmin } from '@/middlewares/authenticate'
 
 export default {
-  POST: [authenticate, disconnectSession],
+  POST: [authenticate, requireAdmin, disconnectSession],
 } satisfies RestController

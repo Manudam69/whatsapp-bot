@@ -26,6 +26,7 @@ export async function getDashboardOverview(req: Request, res: Response, next: Ne
 
     const dispatchesToday = dispatches.filter((item) => item.executedAt.getTime() >= today.getTime())
     const dispatchesLast24Hours = dispatches.filter((item) => item.executedAt.getTime() >= last24Hours)
+    const messageNameById = new Map(messages.map((message) => [message.id, message.name]))
 
     const sentCount = dispatches.filter((item) => item.status === 'SENT').length
     const sentTodayCount = dispatchesToday.filter((item) => item.status === 'SENT').length
@@ -41,6 +42,7 @@ export async function getDashboardOverview(req: Request, res: Response, next: Ne
     const timeline = [
       ...reports.slice(0, 3).map((report) => ({
         id: `report-${report.id}`,
+        kind: 'report' as const,
         title: `Reporte ${report.folio}`,
         description: report.incidentText,
         timestamp: panelAdminService.mapReport(req, report).receivedAt || '',
@@ -50,11 +52,23 @@ export async function getDashboardOverview(req: Request, res: Response, next: Ne
       })),
       ...dispatches.slice(0, 3).map((dispatch) => ({
         id: `dispatch-${dispatch.id}`,
-        title: dispatch.schedule?.name || 'Envio programado',
-        description: `${dispatch.groupName || dispatch.groupJid} · ${dispatch.status}`,
-        timestamp: panelAdminService.mapSentMessage(dispatch, dispatch.schedule?.name).sentAt || '',
+        kind: 'dispatch' as const,
+        title: 'Notificación programada enviada',
+        description: dispatch.status === 'SENT'
+          ? 'La programación se ejecutó correctamente y el mensaje salió al grupo destino.'
+          : dispatch.status === 'FAILED'
+            ? 'La programación se ejecutó pero el envío no se completó y requiere revisión.'
+            : 'La programación quedó en proceso y sigue pendiente de confirmación.',
+        timestamp: panelAdminService.mapSentMessage(
+          dispatch,
+          dispatch.schedule?.messageTemplateId ? messageNameById.get(dispatch.schedule.messageTemplateId) : undefined,
+        ).sentAt || '',
         orderAt: dispatch.executedAt.getTime(),
         tone: dispatch.status === 'SENT' ? 'success' : dispatch.status === 'FAILED' ? 'warning' : 'info',
+        scheduleName: dispatch.schedule?.name || 'Programación sin nombre',
+        messageName: dispatch.schedule?.messageTemplateId ? messageNameById.get(dispatch.schedule.messageTemplateId) : undefined,
+        groupName: dispatch.groupName || dispatch.groupJid,
+        dispatchStatus: dispatch.status,
       })),
     ]
       .sort((a, b) => b.orderAt - a.orderAt)

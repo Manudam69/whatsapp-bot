@@ -1,7 +1,7 @@
 import { deleteImage, updateImage } from '@/controllers/panel_images.controller'
-import { authenticate } from '@/middlewares/authenticate'
+import { authenticate, requireAdmin } from '@/middlewares/authenticate'
 
 export default {
-  PATCH: [authenticate, updateImage],
-  DELETE: [authenticate, deleteImage],
+  PATCH: [authenticate, requireAdmin, updateImage],
+  DELETE: [authenticate, requireAdmin, deleteImage],
 } satisfies RestController
