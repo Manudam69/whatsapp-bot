@@ -3,25 +3,14 @@ import fs from 'fs'
 import path from 'path'
 import { config } from '@/config'
 import { AutoMessage } from '@/entities/auto_message.entity'
-import { BotConfiguration } from '@/entities/bot_configuration.entity'
+import type { BotConfigurationSettings } from '@/entities/bot_configuration.entity'
 import { IncidentReport } from '@/entities/incident_report.entity'
 import { MediaAsset } from '@/entities/media_asset.entity'
 import { NotificationDispatch } from '@/entities/notification_dispatch.entity'
 import { NotificationSchedule } from '@/entities/notification_schedule.entity'
 import { WhatsappGroup } from '@/entities/whatsapp_group.entity'
 
-type BotSettingsShape = Pick<BotConfiguration,
-  | 'reportKeyword'
-  | 'retryAttempts'
-  | 'retryDelayMs'
-  | 'dispatchWindowMinutes'
-  | 'concurrencyLimit'
-  | 'operationalGroupId'
-  | 'firstReplyText'
-  | 'firstReplyEnabled'
-  | 'confirmationEnabled'
-  | 'strategy'
->
+type BotSettingsShape = BotConfigurationSettings
 
 const dayNameToNumber = {
   sunday: 0,
@@ -179,6 +168,8 @@ export const panelAdminService = {
       firstReplyText: settings.firstReplyText,
       firstReplyEnabled: settings.firstReplyEnabled,
       confirmationEnabled: settings.confirmationEnabled,
+      reviewedReplyText: settings.reviewedReplyText,
+      resolvedReplyText: settings.resolvedReplyText,
       strategy: settings.strategy,
     }
   },

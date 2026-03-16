@@ -3,39 +3,196 @@ import { EntityBase } from './entity.base'
 
 export type BotStrategy = 'official-api' | 'external-provider' | 'hybrid-automation'
 
+export interface BotConfigurationSettings {
+  reportKeyword: string
+  retryAttempts: number
+  retryDelayMs: number
+  dispatchWindowMinutes: number
+  concurrencyLimit: number
+  operationalGroupId?: string
+  firstReplyText: string
+  firstReplyEnabled: boolean
+  confirmationEnabled: boolean
+  reviewedReplyText: string
+  resolvedReplyText: string
+  strategy: BotStrategy
+}
+
+export const DEFAULT_REVIEWED_REPLY_TEXT = [
+  '*ACTUALIZACION DE REPORTE*',
+  '',
+  'Tu reporte *{{folio}}* ya esta siendo revisado por el equipo.',
+  'Te compartiremos una nueva actualizacion cuando quede resuelto.',
+].join('\n')
+
+export const DEFAULT_RESOLVED_REPLY_TEXT = [
+  '*ACTUALIZACION DE REPORTE*',
+  '',
+  'Tu reporte *{{folio}}* fue marcado como resuelto.',
+  'Si el problema continua, responde a este mensaje para dar seguimiento.',
+].join('\n')
+
+const DEFAULT_SETTINGS: BotConfigurationSettings = {
+  reportKeyword: 'REPORTE',
+  retryAttempts: 3,
+  retryDelayMs: 2000,
+  dispatchWindowMinutes: 12,
+  concurrencyLimit: 18,
+  operationalGroupId: undefined,
+  firstReplyText: 'Gracias por tu mensaje. Tu reporte fue recibido y enviado al grupo operativo para seguimiento.',
+  firstReplyEnabled: true,
+  confirmationEnabled: true,
+  reviewedReplyText: DEFAULT_REVIEWED_REPLY_TEXT,
+  resolvedReplyText: DEFAULT_RESOLVED_REPLY_TEXT,
+  strategy: 'hybrid-automation',
+}
+
+function normalizeOptionalText(value?: string | null) {
+  const normalized = value?.trim()
+  return normalized ? normalized : undefined
+}
+
+function normalizeRequiredText(value: string | undefined, fallback: string) {
+  const normalized = value?.trim()
+  return normalized ? normalized : fallback
+}
+
+function normalizeSettings(input?: Partial<BotConfigurationSettings>): BotConfigurationSettings {
+  const merged = {
+    ...DEFAULT_SETTINGS,
+    ...(input ?? {}),
+  }
+
+  return {
+    ...merged,
+    operationalGroupId: normalizeOptionalText(merged.operationalGroupId),
+    firstReplyText: normalizeRequiredText(merged.firstReplyText, DEFAULT_SETTINGS.firstReplyText),
+    reviewedReplyText: normalizeRequiredText(merged.reviewedReplyText, DEFAULT_SETTINGS.reviewedReplyText),
+    resolvedReplyText: normalizeRequiredText(merged.resolvedReplyText, DEFAULT_SETTINGS.resolvedReplyText),
+  }
+}
+
 @Entity({ name: 'bot_configurations' })
 @Index('UQ_bot_configurations_owner_phone_number', ['ownerPhoneNumber'], { unique: true })
 export class BotConfiguration extends EntityBase {
   @Column({ name: 'owner_phone_number' })
   ownerPhoneNumber: string
 
-  @Column({ name: 'report_keyword', default: 'REPORTE' })
-  reportKeyword: string
+  @Column({ name: 'settings', type: 'jsonb', default: () => "'{}'::jsonb" })
+  private settingsData: Partial<BotConfigurationSettings>
 
-  @Column({ name: 'retry_attempts', default: 3 })
-  retryAttempts: number
+  get settings() {
+    return normalizeSettings(this.settingsData)
+  }
 
-  @Column({ name: 'retry_delay_ms', default: 2000 })
-  retryDelayMs: number
+  set settings(value: Partial<BotConfigurationSettings>) {
+    this.settingsData = normalizeSettings(value)
+  }
 
-  @Column({ name: 'dispatch_window_minutes', default: 12 })
-  dispatchWindowMinutes: number
+  private getSetting<K extends keyof BotConfigurationSettings>(key: K): BotConfigurationSettings[K] {
+    return this.settings[key] as BotConfigurationSettings[K]
+  }
 
-  @Column({ name: 'concurrency_limit', default: 18 })
-  concurrencyLimit: number
+  private setSetting<K extends keyof BotConfigurationSettings>(key: K, value: BotConfigurationSettings[K]) {
+    this.settingsData = normalizeSettings({
+      ...this.settingsData,
+      [key]: value,
+    })
+  }
 
-  @Column({ name: 'operational_group_id', nullable: true })
-  operationalGroupId?: string
+  get reportKeyword() {
+    return this.getSetting('reportKeyword')
+  }
 
-  @Column({ name: 'first_reply_text', type: 'text', default: 'Gracias por tu mensaje. Tu reporte fue recibido y enviado al grupo operativo para seguimiento.' })
-  firstReplyText: string
+  set reportKeyword(value: string) {
+    this.setSetting('reportKeyword', normalizeRequiredText(value, DEFAULT_SETTINGS.reportKeyword))
+  }
 
-  @Column({ name: 'first_reply_enabled', default: true })
-  firstReplyEnabled: boolean
+  get retryAttempts() {
+    return this.getSetting('retryAttempts')
+  }
 
-  @Column({ name: 'confirmation_enabled', default: true })
-  confirmationEnabled: boolean
+  set retryAttempts(value: number) {
+    this.setSetting('retryAttempts', value)
+  }
 
-  @Column({ default: 'hybrid-automation' })
-  strategy: BotStrategy
+  get retryDelayMs() {
+    return this.getSetting('retryDelayMs')
+  }
+
+  set retryDelayMs(value: number) {
+    this.setSetting('retryDelayMs', value)
+  }
+
+  get dispatchWindowMinutes() {
+    return this.getSetting('dispatchWindowMinutes')
+  }
+
+  set dispatchWindowMinutes(value: number) {
+    this.setSetting('dispatchWindowMinutes', value)
+  }
+
+  get concurrencyLimit() {
+    return this.getSetting('concurrencyLimit')
+  }
+
+  set concurrencyLimit(value: number) {
+    this.setSetting('concurrencyLimit', value)
+  }
+
+  get operationalGroupId() {
+    return this.getSetting('operationalGroupId')
+  }
+
+  set operationalGroupId(value: string | undefined) {
+    this.setSetting('operationalGroupId', normalizeOptionalText(value))
+  }
+
+  get firstReplyText() {
+    return this.getSetting('firstReplyText')
+  }
+
+  set firstReplyText(value: string) {
+    this.setSetting('firstReplyText', normalizeRequiredText(value, DEFAULT_SETTINGS.firstReplyText))
+  }
+
+  get firstReplyEnabled() {
+    return this.getSetting('firstReplyEnabled')
+  }
+
+  set firstReplyEnabled(value: boolean) {
+    this.setSetting('firstReplyEnabled', value)
+  }
+
+  get confirmationEnabled() {
+    return this.getSetting('confirmationEnabled')
+  }
+
+  set confirmationEnabled(value: boolean) {
+    this.setSetting('confirmationEnabled', value)
+  }
+
+  get reviewedReplyText() {
+    return this.getSetting('reviewedReplyText')
+  }
+
+  set reviewedReplyText(value: string) {
+    this.setSetting('reviewedReplyText', normalizeRequiredText(value, DEFAULT_SETTINGS.reviewedReplyText))
+  }
+
+  get resolvedReplyText() {
+    return this.getSetting('resolvedReplyText')
+  }
+
+  set resolvedReplyText(value: string) {
+    this.setSetting('resolvedReplyText', normalizeRequiredText(value, DEFAULT_SETTINGS.resolvedReplyText))
+  }
+
+  get strategy() {
+    return this.getSetting('strategy')
+  }
+
+  set strategy(value: BotStrategy) {
+    this.setSetting('strategy', value)
+  }
 }

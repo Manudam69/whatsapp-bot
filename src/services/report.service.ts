@@ -1,4 +1,5 @@
 import { config } from '@/config'
+import type { BotConfigurationSettings } from '@/entities/bot_configuration.entity'
 import { ClientContact } from '@/entities/client_contact.entity'
 import { IncidentReport } from '@/entities/incident_report.entity'
 import { NotFound } from '@/middlewares/error_handler'
@@ -38,23 +39,20 @@ export function formatReportMessage(report: IncidentReport) {
   ].join('\n')
 }
 
-export function formatReportStatusNotification(report: IncidentReport) {
+function fillStatusTemplate(template: string, report: IncidentReport) {
+  return template.replace(/{{\s*folio\s*}}/gi, report.folio)
+}
+
+export function formatReportStatusNotification(
+  report: IncidentReport,
+  settings: Pick<BotConfigurationSettings, 'reviewedReplyText' | 'resolvedReplyText'>,
+) {
   if (report.reviewStatus === 'reviewed') {
-    return [
-      '*ACTUALIZACION DE REPORTE*',
-      '',
-      `Tu reporte *${report.folio}* ya esta siendo revisado por el equipo.`,
-      'Te compartiremos una nueva actualizacion cuando quede resuelto.',
-    ].join('\n')
+    return fillStatusTemplate(settings.reviewedReplyText, report)
   }
 
   if (report.reviewStatus === 'resolved') {
-    return [
-      '*ACTUALIZACION DE REPORTE*',
-      '',
-      `Tu reporte *${report.folio}* fue marcado como resuelto.`,
-      'Si el problema continua, responde a este mensaje para dar seguimiento.',
-    ].join('\n')
+    return fillStatusTemplate(settings.resolvedReplyText, report)
   }
 
   return null

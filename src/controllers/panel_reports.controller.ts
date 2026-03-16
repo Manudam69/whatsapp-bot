@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from 'express'
+import { botConfigurationService } from '@/services/bot_configuration.service'
 import { formatReportStatusNotification, reportService } from '@/services/report.service'
 import { panelAdminService } from '@/services/panel_admin.service'
 import { outboundMessageService } from '@/services/outbound_message.service'
@@ -32,8 +33,9 @@ export async function updateReport(req: Request, res: Response, next: NextFuncti
     const requestedStatus = String(req.body?.status || 'pending')
     const status: IncidentReport['reviewStatus'] = isValidReviewStatus(requestedStatus) ? requestedStatus : 'pending'
     const report = await reportService.setReviewStatus(ownerPhoneNumber, reportId, status)
+    const botSettings = await botConfigurationService.get(ownerPhoneNumber)
 
-    const notification = formatReportStatusNotification(report)
+    const notification = formatReportStatusNotification(report, botSettings)
 
     if (notification && report.contact?.whatsappJid) {
       try {
