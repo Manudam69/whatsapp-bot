@@ -48,7 +48,6 @@ async function bootstrap() {
 
   app.use(morgan('[:date[iso]] (:status) ":method :url HTTP/:http-version" :response-time ms - [:res[content-length]]'))
   app.use(cors(corsOptions))
-  app.options('*', cors(corsOptions))
   app.use(helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   }))
