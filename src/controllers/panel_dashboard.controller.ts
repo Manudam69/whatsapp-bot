@@ -46,6 +46,7 @@ export async function getDashboardOverview(req: Request, res: Response, next: Ne
         timestamp: panelAdminService.mapReport(req, report).receivedAt || '',
         orderAt: report.receivedAt.getTime(),
         tone: report.reviewStatus === 'resolved' ? 'success' : report.reviewStatus === 'reviewed' ? 'info' : 'warning',
+        reportId: report.id,
       })),
       ...dispatches.slice(0, 3).map((dispatch) => ({
         id: `dispatch-${dispatch.id}`,
