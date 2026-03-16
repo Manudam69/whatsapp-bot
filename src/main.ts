@@ -4,7 +4,7 @@ import cors from 'cors'
 import helmet from 'helmet'
 import morgan from 'morgan'
 import path from 'path'
-import { config } from '@/config'
+import { config, validateConfig } from '@/config'
 import logger from '@/utils/logger'
 import { AppDataSource } from '@/database/datasource'
 import handleErrorMiddleware from '@/middlewares/error_handler'
@@ -17,6 +17,8 @@ const app = express()
 const router = express.Router()
 
 async function bootstrap() {
+  validateConfig()
+
   await AppDataSource.initialize()
   logger.info('Database connection established')
 
@@ -54,6 +56,11 @@ async function bootstrap() {
 }
 
 bootstrap().catch((error) => {
-  logger.error(`Bootstrap error: ${error instanceof Error ? error.stack || error.message : String(error)}`)
+  if (error instanceof Error && error.name === 'ConfigValidationError') {
+    logger.error(`${error.message}. Revisa tu archivo .env y compáralo con .env.example.`)
+  } else {
+    logger.error(`Bootstrap error: ${error instanceof Error ? error.stack || error.message : String(error)}`)
+  }
+
   process.exit(1)
 })

@@ -328,6 +328,39 @@ Configura PostgreSQL y despues ejecuta:
 npm run dev
 ```
 
+## Variables de entorno
+
+Obligatorias para arrancar el servidor:
+
+- `DB_USER`
+- `DB_PASSWORD`
+- `DB_NAME`
+- `JWT_SECRET`
+- `DEFAULT_ADMIN_NAME`
+- `DEFAULT_ADMIN_EMAIL`
+- `DEFAULT_ADMIN_PASSWORD`
+
+Opcionales con valor por defecto:
+
+- `ENV`
+- `APP_NAME`
+- `PORT`
+- `FRONTEND_URL`
+- `ALLOW_ORIGINS`
+- `DB_HOST`
+- `DB_PORT`
+- `DB_SYNCHRONIZE`
+- `OPERATIONS_GROUP_JID`
+- `DEFAULT_COUNTRY_CODE`
+- `SCHEDULE_TIME_ZONE`
+- `MESSAGE_THROTTLE_MS`
+- `MAX_SEND_RETRIES`
+- `SESSION_AUTH_DIR`
+- `MEDIA_UPLOAD_DIR`
+- `JWT_EXPIRES_IN`
+
+Si falta una obligatoria o una numérica tiene un valor inválido, el servidor aborta el arranque con un error de configuración.
+
 ## Notas operativas
 
 - La primera vinculacion de WhatsApp requiere escanear el QR que Baileys imprime en consola.
