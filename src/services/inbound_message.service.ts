@@ -15,8 +15,8 @@ const CANCEL_COMMAND = 'CANCELAR'
 
 const PROMPTS = {
   service: '*Paso 1 de 4*\n\nEscribe solo el *servicio*.',
-  date: '*Paso 2 de 4*\n\nServicio registrado correctamente.\n\nEscribe solo la *fecha del reporte*.',
-  time: '*Paso 3 de 4*\n\nFecha registrada correctamente.\n\nEscribe solo la *hora del reporte*.',
+  date: '*Paso 2 de 4*\n\nServicio registrado correctamente.\n\nEscribe solo la *fecha del reporte*.\nFormato: _DD/MM/AAAA_ (ejemplo: _15/03/2024_)',
+  time: '*Paso 3 de 4*\n\nFecha registrada correctamente.\n\nEscribe solo la *hora del reporte*.\nFormato: _HH:MM_ en 24 hrs (ejemplo: _14:30_)',
   incident: '*Paso 4 de 4*\n\nHora registrada correctamente.\n\nEscribe solo la *incidencia*.',
   confirm:
     '*Resumen del reporte*\n\n- *Servicio:* {{service}}\n- *Fecha:* {{date}}\n- *Hora:* {{time}}\n- *Incidencia:* {{incident}}\n\nResponde *SI* para confirmar o *NO* para capturar de nuevo.',
@@ -24,7 +24,37 @@ const PROMPTS = {
   cancelled: '*Captura cancelada*\n\nSi deseas generar un nuevo reporte, envia cualquier mensaje.',
   invalidConfirmation: '*Respuesta no valida*\n\nResponde *SI* para confirmar o *NO* para capturar de nuevo.',
   restart: '*Se reiniciara la captura del reporte.*\n\nVolvamos a comenzar.',
+  invalidService: '*El nombre del servicio no es valido.*\n\nDebe tener al menos 2 caracteres.\n\nEscribe nuevamente el *servicio*.',
+  invalidDate: '*Formato de fecha no valido.*\n\nEscribe la fecha en formato *DD/MM/AAAA*\nEjemplo: _15/03/2024_',
+  invalidTime: '*Formato de hora no valido.*\n\nEscribe la hora en formato *HH:MM* en 24 hrs\nEjemplo: _14:30_',
+  invalidIncident: '*La descripcion de la incidencia es muy corta.*\n\nEscribe nuevamente la *incidencia* con mas detalle.',
 } as const
+
+// Acepta DD/MM/AAAA, DD-MM-AAAA o DD.MM.AAAA con años de 2 o 4 dígitos
+const DATE_REGEX = /^\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}$/
+
+// Acepta HH:MM o HH:MM:SS (24 hrs)
+const TIME_REGEX = /^\d{1,2}:\d{2}(:\d{2})?$/
+
+const SERVICE_MIN_LENGTH = 2
+const INCIDENT_MIN_LENGTH = 5
+
+function isValidDate(value: string) {
+  if (!DATE_REGEX.test(value)) {
+    return false
+  }
+  const parts = value.split(/[\/\-\.]/).map(Number)
+  const [day, month] = parts
+  return day >= 1 && day <= 31 && month >= 1 && month <= 12
+}
+
+function isValidTime(value: string) {
+  if (!TIME_REGEX.test(value)) {
+    return false
+  }
+  const [hours, minutes] = value.split(':').map(Number)
+  return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59
+}
 
 function fillTemplate(template: string, values: Record<string, string>) {
   return Object.entries(values).reduce((result, [key, value]) => result.split(`{{${key}}}`).join(value), template)
@@ -133,6 +163,10 @@ export const inboundMessageService = {
     }
 
     if (contact.currentFlow === 'AWAITING_SERVICE') {
+      if (trimmedText.length < SERVICE_MIN_LENGTH) {
+        await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: PROMPTS.invalidService, sourceType: 'FLOW_REPLY' })
+        return
+      }
       contact.draftServiceName = trimmedText
       contact.currentFlow = 'AWAITING_DATE'
       await contact.save()
@@ -141,6 +175,10 @@ export const inboundMessageService = {
     }
 
     if (contact.currentFlow === 'AWAITING_DATE') {
+      if (!isValidDate(trimmedText)) {
+        await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: PROMPTS.invalidDate, sourceType: 'FLOW_REPLY' })
+        return
+      }
       contact.draftIncidentDate = trimmedText
       contact.currentFlow = 'AWAITING_TIME'
       await contact.save()
@@ -149,6 +187,10 @@ export const inboundMessageService = {
     }
 
     if (contact.currentFlow === 'AWAITING_TIME') {
+      if (!isValidTime(trimmedText)) {
+        await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: PROMPTS.invalidTime, sourceType: 'FLOW_REPLY' })
+        return
+      }
       contact.draftIncidentTime = trimmedText
       contact.currentFlow = 'AWAITING_INCIDENT'
       await contact.save()
@@ -157,6 +199,10 @@ export const inboundMessageService = {
     }
 
     if (contact.currentFlow === 'AWAITING_INCIDENT') {
+      if (trimmedText.length < INCIDENT_MIN_LENGTH) {
+        await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: PROMPTS.invalidIncident, sourceType: 'FLOW_REPLY' })
+        return
+      }
       contact.draftIncidentText = trimmedText
       contact.currentFlow = 'AWAITING_CONFIRMATION'
       await contact.save()
