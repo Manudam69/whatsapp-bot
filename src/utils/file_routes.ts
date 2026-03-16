@@ -4,12 +4,15 @@ import { Router } from 'express'
 import logger from '@/utils/logger'
 
 function buildURLPath(routePath: string[]) {
-  const finalPath = routePath.map((value) => (value.startsWith('[') && value.endsWith(']') ? `:${value.slice(1, value.length - 1)}` : value))
+  const normalizedRoutePath = routePath[0] === 'api' ? routePath.slice(1) : routePath
+  const finalPath = normalizedRoutePath.map((value) => (value.startsWith('[') && value.endsWith(']') ? `:${value.slice(1, value.length - 1)}` : value))
   return ('/' + finalPath.join('/').replace('//', '/')).replace('//', '/')
 }
 
 export async function initFileBasedRoutes(router: Router, routePath: string[] = [], routeGroups: Record<string, string[]> = {}) {
-  const baseDir = path.resolve(__dirname, '..', 'routes')
+  const routesApiDir = path.resolve(__dirname, '..', 'routes', 'api')
+  const routesDir = path.resolve(__dirname, '..', 'routes')
+  const baseDir = fs.existsSync(routesApiDir) ? routesApiDir : routesDir
   const currentDir = path.join(baseDir, ...routePath)
   const entries = fs.readdirSync(currentDir, { withFileTypes: true })
 
