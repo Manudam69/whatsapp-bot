@@ -14,7 +14,7 @@ const INITIAL_PROMPT =
 const CANCEL_COMMAND = 'CANCELAR'
 
 const PROMPTS = {
-  service: '*Paso 1 de 4*\n\nEscribe solo el *servicio*.',
+  service: '*Paso 1 de 4*\n\nEscribe solo el nombre del *servicio* de donde nos contacta.',
   date: '*Paso 2 de 4*\n\nServicio registrado correctamente.\n\nEscribe solo la *fecha del reporte*.\nFormato: _DD/MM/AAAA_ (ejemplo: _15/03/2024_)',
   time: '*Paso 3 de 4*\n\nFecha registrada correctamente.\n\nEscribe solo la *hora del reporte*.\nFormato: _HH:MM_ en 24 hrs (ejemplo: _14:30_)',
   incident: '*Paso 4 de 4*\n\nHora registrada correctamente.\n\nEscribe solo la *incidencia*.',
