@@ -25,10 +25,25 @@ const PROMPTS = {
   invalidConfirmation: '*Respuesta no valida*\n\nResponde *SI* para confirmar o *NO* para capturar de nuevo.',
   restart: '*Se reiniciara la captura del reporte.*\n\nVolvamos a comenzar.',
   invalidService: '*El nombre del servicio no es valido.*\n\nDebe tener al menos 2 caracteres.\n\nEscribe nuevamente el *servicio*.',
-  invalidDate: '*Formato de fecha no valido.*\n\nEscribe la fecha en formato *DD/MM/AAAA*\nEjemplo: _15/03/2024_',
-  invalidTime: '*Formato de hora no valido.*\n\nEscribe la hora en formato *HH:MM* en 24 hrs\nEjemplo: _14:30_',
   invalidIncident: '*La descripcion de la incidencia es muy corta.*\n\nEscribe nuevamente la *incidencia* con mas detalle.',
 } as const
+
+// Multiple variants for repeated validation errors to avoid identical messages.
+const INVALID_DATE_VARIANTS = [
+  '*Formato de fecha no valido.*\n\nEscribe la fecha en formato *DD/MM/AAAA*\nEjemplo: _15/03/2024_',
+  '*No reconoci ese formato.*\n\nUsa *DD/MM/AAAA*, por ejemplo: _15/03/2024_',
+  '*Fecha no reconocida.*\n\nEl formato esperado es *DD/MM/AAAA*\nEjemplo: _15/03/2024_',
+]
+
+const INVALID_TIME_VARIANTS = [
+  '*Formato de hora no valido.*\n\nEscribe la hora en formato *HH:MM* en 24 hrs\nEjemplo: _14:30_',
+  '*No reconoci ese formato de hora.*\n\nUsa *HH:MM* en 24 hrs, por ejemplo: _14:30_',
+  '*Hora no reconocida.*\n\nEl formato esperado es *HH:MM*\nEjemplo: _14:30_',
+]
+
+function pickVariant(variants: readonly string[]): string {
+  return variants[Math.floor(Math.random() * variants.length)]!
+}
 
 // Acepta DD/MM/AAAA, DD-MM-AAAA o DD.MM.AAAA con años de 2 o 4 dígitos
 const DATE_REGEX = /^\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}$/
@@ -176,7 +191,7 @@ export const inboundMessageService = {
 
     if (contact.currentFlow === 'AWAITING_DATE') {
       if (!isValidDate(trimmedText)) {
-        await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: PROMPTS.invalidDate, sourceType: 'FLOW_REPLY' })
+        await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: pickVariant(INVALID_DATE_VARIANTS), sourceType: 'FLOW_REPLY' })
         return
       }
       contact.draftIncidentDate = trimmedText
@@ -188,7 +203,7 @@ export const inboundMessageService = {
 
     if (contact.currentFlow === 'AWAITING_TIME') {
       if (!isValidTime(trimmedText)) {
-        await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: PROMPTS.invalidTime, sourceType: 'FLOW_REPLY' })
+        await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: pickVariant(INVALID_TIME_VARIANTS), sourceType: 'FLOW_REPLY' })
         return
       }
       contact.draftIncidentTime = trimmedText

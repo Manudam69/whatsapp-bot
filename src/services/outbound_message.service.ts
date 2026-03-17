@@ -5,6 +5,7 @@ import { reportService } from './report.service'
 import { sleep } from '@/utils/sleep'
 import logger from '@/utils/logger'
 import { whatsappService } from './whatsapp.service'
+import { antibanService } from './antiban.service'
 import { sessionOwnerService } from './session_owner.service'
 
 type BaseQueueInput = {
@@ -120,11 +121,44 @@ class OutboundMessageService {
   }
 
   private async deliver(message: OutboundMessage) {
+    const isScheduled = message.sourceType === 'SCHEDULE'
+
     while (message.attempts < message.maxAttempts) {
       if (!whatsappService.isConnected()) {
         message.errorMessage = 'WhatsApp session is not connected'
         await message.save()
         return
+      }
+
+      const content = message.messageText || message.caption || 'media'
+
+      // Antiban rate limiting applies only to scheduled notifications.
+      // Bot replies (FLOW_REPLY, REPORT_FORWARD, REPORT_STATUS_UPDATE) bypass it.
+      if (isScheduled) {
+        const decision = await antibanService.beforeSend(message.recipientJid, content)
+        if (!decision.allowed) {
+          // Scheduled messages are time-sensitive — mark as FAILED instead of
+          // leaving as PENDING, since delivering them the next day is incorrect.
+          message.status = 'FAILED'
+          message.errorMessage = decision.reason ?? 'antiban: límite diario alcanzado'
+          await message.save()
+          await this.afterFailure(message)
+          logger.warn(`[antiban] Notificación programada ${message.id} expirada: ${decision.reason}`)
+          return
+        }
+
+        // Human-like delay recommended by antiban
+        if (decision.delayMs > 0) {
+          await sleep(decision.delayMs)
+        }
+      }
+
+      // Human-like delay for bot flow replies: show typing indicator + 2–5s wait.
+      // This avoids the "instant bot" pattern that WhatsApp detects.
+      if (message.sourceType === 'FLOW_REPLY') {
+        const humanDelay = 2000 + Math.floor(Math.random() * 3000) // 2–5s
+        await whatsappService.sendTyping(message.recipientJid)
+        await sleep(humanDelay)
       }
 
       message.attempts += 1
@@ -139,6 +173,8 @@ class OutboundMessageService {
           await whatsappService.sendTextNow(message.recipientJid, message.messageText || '')
         }
 
+        if (isScheduled) antibanService.afterSend(message.recipientJid, content)
+
         message.status = 'SENT'
         message.sentAt = new Date()
         message.errorMessage = undefined
@@ -147,6 +183,7 @@ class OutboundMessageService {
         return
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error)
+        if (isScheduled) antibanService.afterSendFailed(errorMessage)
         message.errorMessage = errorMessage
         await message.save()
 

@@ -47,6 +47,7 @@ export const config = Object.freeze({
   SCHEDULE_TIME_ZONE: process.env.SCHEDULE_TIME_ZONE || 'America/Mexico_City',
   MESSAGE_THROTTLE_MS: parseNumberEnv('MESSAGE_THROTTLE_MS', 1500),
   MAX_SEND_RETRIES: parseNumberEnv('MAX_SEND_RETRIES', 3),
+  ANTIBAN_SKIP_WARMUP: process.env.ANTIBAN_SKIP_WARMUP === 'true',
   SESSION_AUTH_DIR: process.env.SESSION_AUTH_DIR || 'auth',
   MEDIA_UPLOAD_DIR: process.env.MEDIA_UPLOAD_DIR || 'uploads/media',
   AUTH: {

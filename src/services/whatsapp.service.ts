@@ -13,6 +13,7 @@ import logger from '@/utils/logger'
 import { inboundMessageService } from './inbound_message.service'
 import { groupService } from './group.service'
 import { whatsappIdentityService } from './whatsapp_identity.service'
+import { antibanService } from './antiban.service'
 import { getPhoneNumberFromJid } from '@/utils/phone'
 
 function createSilentBaileysLogger() {
@@ -90,6 +91,7 @@ class WhatsappService {
           const phoneNumber = getPhoneNumberFromJid(this.socket?.user?.id)
           this.state = { status: 'connected', connectedAt: new Date(), phoneNumber }
           logger.info('WhatsApp connection established')
+          antibanService.onReconnect()
           await whatsappIdentityService.repairStoredContacts(phoneNumber)
           await this.scheduleInitialGroupSync()
           const { outboundMessageService } = await import('./outbound_message.service')
@@ -99,9 +101,11 @@ class WhatsappService {
         if (connection === 'close') {
           this.clearGroupSyncTimer()
           this.socket = undefined
-          const disconnectedByLogout = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode === DisconnectReason.loggedOut
+          const statusCode = (lastDisconnect?.error as Boom | undefined)?.output?.statusCode
+          const disconnectedByLogout = statusCode === DisconnectReason.loggedOut
           const shouldReconnect = this.allowReconnect && !disconnectedByLogout
           this.state = { status: 'disconnected' }
+          antibanService.onDisconnect(statusCode)
           logger.warn(`WhatsApp connection closed. reconnect=${shouldReconnect}`)
 
           if (shouldReconnect) {
@@ -115,7 +119,18 @@ class WhatsappService {
           return
         }
 
+        // Flood guard: when multiple messages from the same contact arrive in one
+        // batch (e.g. after a reconnect), only process the last one per JID.
+        // Earlier messages are irrelevant — the contact already sent a newer one.
+        const latestByJid = new Map<string, WAMessage>()
         for (const message of event.messages) {
+          const jid = message.key.remoteJid
+          if (jid && !message.key.fromMe && !jid.endsWith('@g.us')) {
+            latestByJid.set(jid, message)
+          }
+        }
+
+        for (const message of latestByJid.values()) {
           await this.handleMessage(message)
         }
       })
@@ -173,6 +188,14 @@ class WhatsappService {
 
   async sendMedia(jid: string, filePath: string, caption?: string) {
     await this.sendMediaNow(jid, filePath, caption)
+  }
+
+  async sendTyping(jid: string): Promise<void> {
+    try {
+      await this.socket?.sendPresenceUpdate('composing', jid)
+    } catch {
+      // Best-effort — never block on presence updates
+    }
   }
 
   async sendTextNow(jid: string, text: string) {

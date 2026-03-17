@@ -361,10 +361,77 @@ Opcionales con valor por defecto:
 
 Si falta una obligatoria o una numérica tiene un valor inválido, el servidor aborta el arranque con un error de configuración.
 
+## Sistema anti-ban
+
+El bot implementa un middleware anti-ban propio (`src/services/antiban.service.ts`) que protege el numero de WhatsApp conectado simulando patrones humanos de mensajeria.
+
+### Como funciona
+
+Cada mensaje saliente pasa por tres capas antes de enviarse:
+
+1. **Rate limiter con jitter gaussiano**: los delays entre mensajes se distribuyen alrededor del punto medio del rango configurado en lugar de ser uniformes, imitando el comportamiento humano. Hay un `burstAllowance` para los primeros mensajes (igual que un humano que escribe rapido al principio) y una penalizacion extra para chats nuevos (`newChatDelayMs`).
+
+2. **Warm-up gradual**: si el numero es nuevo o estuvo inactivo mas de 72 horas, entra en un periodo de calentamiento de 7 dias donde el limite diario crece progresivamente:
+
+   | Dia | Limite |
+   |-----|--------|
+   | 1   | 20     |
+   | 2   | 36     |
+   | 3   | 65     |
+   | 4   | 117    |
+   | 5   | 210    |
+   | 6   | 378    |
+   | 7+  | Sin limite de warm-up |
+
+   El estado de warm-up se persiste en `data/antiban-warmup.json` para sobrevivir reinicios del servidor.
+
+3. **Monitor de salud**: registra señales de riesgo de baneo — desconexiones frecuentes, errores 403/401, mensajes fallidos — y calcula un score de 0 a 100:
+
+   | Nivel    | Score   | Accion automatica                         |
+   |----------|---------|-------------------------------------------|
+   | Bajo     | 0–29    | Operacion normal                          |
+   | Medio    | 30–59   | Advertencia en logs                       |
+   | Alto     | 60–84   | **Auto-pausa** de todos los envios        |
+   | Critico  | 85–100  | Pausa + log de alerta urgente             |
+
+   Cuando el riesgo baja de nivel, el score decae naturalmente para evitar falsos positivos permanentes.
+
+### Integracion en el flujo de envio
+
+El metodo `deliver()` del servicio de mensajes salientes consulta al antiban **antes de cada intento**:
+
+- Si `allowed: false` → el mensaje queda como `PENDING` y se reintenta en el siguiente ciclo de flush.
+- Si `allowed: true` → espera el `delayMs` recomendado (que incluye jitter + typing simulation) y luego envia.
+- Despues de cada envio exitoso llama a `afterSend()` para actualizar los contadores internos.
+- Despues de cada fallo llama a `afterSendFailed(errorMessage)` para que el monitor de salud evalue si el error indica riesgo de baneo.
+
+Los eventos de conexion/desconexion de Baileys tambien se reportan al antiban (`onDisconnect` / `onReconnect`).
+
+### Endpoints del panel
+
+- `GET /api/session/antiban` — retorna el estado actual del antiban (riesgo, score, contadores, warm-up).
+- `POST /api/session/antiban` con `{ "action": "pause" }` — pausa manualmente todos los envios.
+- `POST /api/session/antiban` con `{ "action": "resume" }` — reanuda los envios.
+
+### Panel de salud en la UI
+
+El dashboard del panel administrativo tiene un tab **"Proteccion anti-ban"** que muestra:
+
+- Nivel de riesgo actual con barra de score
+- Botón para pausar/reanudar manualmente
+- Contadores de mensajes (hoy, esta hora, este minuto) vs limites
+- Estado del warm-up con barra de progreso diaria
+
+### Configuracion actual
+
+Los parametros configurados en el singleton `antibanService` estan en `src/services/antiban.service.ts` al final del archivo. Puedes ajustarlos sin cambiar la logica interna.
+
 ## Notas operativas
 
 - La primera vinculacion de WhatsApp requiere escanear el QR que Baileys imprime en consola.
 - La sesion se guarda en `./auth`.
 - Las imagenes se guardan en `./uploads/media`.
+- El estado del warm-up anti-ban se guarda en `./data/antiban-warmup.json` — no borrar entre reinicios.
 - Para produccion conviene reemplazar `DB_SYNCHRONIZE=true` por migraciones formales.
 - Para operar en muchos grupos, mantén el `MESSAGE_THROTTLE_MS` y monitorea el historial de fallos.
+- Revisa regularmente el tab "Proteccion anti-ban" en el dashboard. Si el nivel llega a "Alto" el bot se pausa automaticamente hasta que lo reanudes manualmente.
