@@ -17,7 +17,7 @@ RUN npm ci --omit=dev
 
 COPY --from=build /app/build ./build
 
-RUN mkdir -p auth uploads/media logs
+RUN mkdir -p auth uploads/media logs data
 
 EXPOSE 3000
 

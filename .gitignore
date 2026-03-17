@@ -6,3 +6,4 @@ logs/
 uploads/media/
 auth/
 *.log
+data/
