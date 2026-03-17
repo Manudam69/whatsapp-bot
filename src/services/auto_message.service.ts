@@ -7,7 +7,7 @@ export type AutoMessageInput = {
   content: string
   type: 'text' | 'image'
   imageId?: string | null
-  groupIds: string[]
+  groupIds?: string[]
 }
 
 function validate(input: AutoMessageInput) {
