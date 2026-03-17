@@ -138,6 +138,7 @@ export const panelAdminService = {
       receivedAt: formatDate(report.receivedAt),
       folio: report.folio,
       status: report.reviewStatus,
+      isArchived: report.isArchived,
     }
   },
 

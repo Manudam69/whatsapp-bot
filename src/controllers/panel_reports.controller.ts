@@ -12,6 +12,34 @@ function isValidReviewStatus(value: string): value is IncidentReport['reviewStat
   return value === 'pending' || value === 'reviewed' || value === 'resolved'
 }
 
+export async function listArchivedReports(req: Request, res: Response, next: NextFunction) {
+  try {
+    const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
+    if (!ownerPhoneNumber) {
+      res.json([])
+      return
+    }
+
+    const reports = await reportService.listArchived(ownerPhoneNumber)
+    res.json(reports.map((report) => panelAdminService.mapReport(req, report)))
+  } catch (error) {
+    next(error)
+  }
+}
+
+export async function archiveReport(req: Request, res: Response, next: NextFunction) {
+  try {
+    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
+    const reportId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
+    const isArchived = req.body?.isArchived === true
+
+    const report = await reportService.setArchived(ownerPhoneNumber, reportId, isArchived)
+    res.json(panelAdminService.mapReport(req, report))
+  } catch (error) {
+    next(error)
+  }
+}
+
 export async function listReports(req: Request, res: Response, next: NextFunction) {
   try {
     const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()

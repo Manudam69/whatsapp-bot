@@ -48,4 +48,7 @@ export class IncidentReport extends EntityBase {
 
   @Column({ name: 'forwarded_group_name', nullable: true })
   forwardedGroupName?: string
+
+  @Column({ name: 'is_archived', default: false })
+  isArchived: boolean
 }

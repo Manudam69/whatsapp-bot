@@ -118,7 +118,11 @@ export const reportService = {
   },
 
   async list(ownerPhoneNumber: string) {
-    return IncidentReport.find({ where: { ownerPhoneNumber }, order: { receivedAt: 'DESC' }, take: 100 })
+    return IncidentReport.find({ where: { ownerPhoneNumber, isArchived: false }, order: { receivedAt: 'DESC' }, take: 100 })
+  },
+
+  async listArchived(ownerPhoneNumber: string) {
+    return IncidentReport.find({ where: { ownerPhoneNumber, isArchived: true }, order: { receivedAt: 'DESC' }, take: 100 })
   },
 
   async findById(ownerPhoneNumber: string, id: string) {
@@ -132,6 +136,17 @@ export const reportService = {
     }
 
     report.reviewStatus = reviewStatus
+    await report.save()
+    return report
+  },
+
+  async setArchived(ownerPhoneNumber: string, id: string, isArchived: boolean) {
+    const report = await this.findById(ownerPhoneNumber, id)
+    if (!report) {
+      throw NotFound('Reporte no encontrado.')
+    }
+
+    report.isArchived = isArchived
     await report.save()
     return report
   },
