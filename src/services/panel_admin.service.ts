@@ -132,6 +132,7 @@ export const panelAdminService = {
       senderId: report.contact.id,
       senderName: report.contact.contactName || report.contact.phoneNumber,
       senderPhone: report.contact.phoneNumber,
+      serviceName: report.serviceName,
       content: report.incidentText,
       type: 'text' as const,
       imageUrl: undefined,
