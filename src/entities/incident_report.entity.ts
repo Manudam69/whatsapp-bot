@@ -6,8 +6,8 @@ export type ReportStatus = 'RECEIVED' | 'QUEUED' | 'FORWARDED' | 'FAILED'
 
 @Entity({ name: 'incident_reports' })
 export class IncidentReport extends EntityBase {
-  @Column({ name: 'owner_phone_number' })
-  ownerPhoneNumber: string
+  @Column({ name: 'client_id' })
+  clientId: string
 
   @Column({ unique: true })
   folio: string
@@ -43,10 +43,10 @@ export class IncidentReport extends EntityBase {
   @Column({ name: 'forwarded_at', type: 'timestamptz', nullable: true })
   forwardedAt?: Date
 
-  @Column({ name: 'forwarded_group_jid', nullable: true })
+  @Column({ name: 'forwarded_group_jid', type: 'varchar', nullable: true })
   forwardedGroupJid?: string
 
-  @Column({ name: 'forwarded_group_name', nullable: true })
+  @Column({ name: 'forwarded_group_name', type: 'varchar', nullable: true })
   forwardedGroupName?: string
 
   @Column({ name: 'is_archived', default: false })

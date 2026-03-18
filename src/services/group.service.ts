@@ -8,7 +8,7 @@ type ResolveGroupOptions = {
 }
 
 export const groupService = {
-  async upsertGroups(ownerPhoneNumber: string, groups: Array<{ jid: string; name: string; participantCount: number }>) {
+  async upsertGroups(sessionId: string, groups: Array<{ jid: string; name: string; participantCount: number }>) {
     const now = new Date()
     const incomingJids = new Set(groups.map((group) => group.jid))
 
@@ -16,19 +16,19 @@ export const groupService = {
       await WhatsappGroup.createQueryBuilder()
         .update()
         .set({ isMember: false })
-        .where('owner_phone_number = :ownerPhoneNumber', { ownerPhoneNumber })
+        .where('session_id = :sessionId', { sessionId })
         .andWhere('jid NOT IN (:...jids)', { jids: Array.from(incomingJids) })
         .execute()
     } else {
       await WhatsappGroup.createQueryBuilder()
         .update()
         .set({ isMember: false })
-        .where('owner_phone_number = :ownerPhoneNumber', { ownerPhoneNumber })
+        .where('session_id = :sessionId', { sessionId })
         .execute()
     }
 
     for (const group of groups) {
-      const existing = await WhatsappGroup.findOne({ where: { ownerPhoneNumber, jid: group.jid } })
+      const existing = await WhatsappGroup.findOne({ where: { sessionId, jid: group.jid } })
       if (existing) {
         existing.name = group.name
         existing.participantCount = group.participantCount
@@ -39,7 +39,7 @@ export const groupService = {
       }
 
       await WhatsappGroup.save({
-        ownerPhoneNumber,
+        sessionId,
         jid: group.jid,
         name: group.name,
         participantCount: group.participantCount,
@@ -48,35 +48,35 @@ export const groupService = {
       })
     }
 
-    return WhatsappGroup.find({ where: { ownerPhoneNumber, isMember: true }, order: { name: 'ASC' } })
+    return WhatsappGroup.find({ where: { sessionId, isMember: true }, order: { name: 'ASC' } })
   },
 
-  async list(ownerPhoneNumber: string) {
-    return WhatsappGroup.find({ where: { ownerPhoneNumber, isMember: true }, order: { name: 'ASC' } })
+  async list(sessionId: string) {
+    return WhatsappGroup.find({ where: { sessionId, isMember: true }, order: { name: 'ASC' } })
   },
 
-  async listActive(ownerPhoneNumber: string) {
-    return WhatsappGroup.find({ where: { ownerPhoneNumber, isMember: true, isActive: true }, order: { name: 'ASC' } })
+  async listActive(sessionId: string) {
+    return WhatsappGroup.find({ where: { sessionId, isMember: true, isActive: true }, order: { name: 'ASC' } })
   },
 
-  async getLatestSyncAt(ownerPhoneNumber: string) {
+  async getLatestSyncAt(sessionId: string) {
     const latestSyncedGroup = await WhatsappGroup.findOne({
-      where: { ownerPhoneNumber, isMember: true },
+      where: { sessionId, isMember: true },
       order: { lastSyncedAt: 'DESC' },
     })
 
     return latestSyncedGroup?.lastSyncedAt || null
   },
 
-  async resolveGroupJid(ownerPhoneNumber: string, value: string, options: ResolveGroupOptions = {}) {
+  async resolveGroupJid(sessionId: string, value: string, options: ResolveGroupOptions = {}) {
     const normalized = value.trim()
     if (!normalized) {
       return null
     }
 
     const where = options.activeOnly
-      ? { ownerPhoneNumber, isMember: true, isActive: true }
-      : { ownerPhoneNumber, isMember: true }
+      ? { sessionId, isMember: true, isActive: true }
+      : { sessionId, isMember: true }
 
     const byJid = await WhatsappGroup.findOne({ where: { jid: normalized, ...where } })
     if (byJid) {
@@ -87,13 +87,13 @@ export const groupService = {
     return byId?.jid || null
   },
 
-  async resolveGroupJids(ownerPhoneNumber: string, values: string[], options: ResolveGroupOptions = {}) {
-    const resolved = await Promise.all(values.map((value) => this.resolveGroupJid(ownerPhoneNumber, value, options)))
+  async resolveGroupJids(sessionId: string, values: string[], options: ResolveGroupOptions = {}) {
+    const resolved = await Promise.all(values.map((value) => this.resolveGroupJid(sessionId, value, options)))
     return resolved.filter((value): value is string => Boolean(value))
   },
 
-  async deactivateDependencies(ownerPhoneNumber: string, groupJid: string) {
-    const messages = await AutoMessage.find({ where: { ownerPhoneNumber } })
+  async deactivateDependencies(sessionId: string, clientId: string, groupJid: string) {
+    const messages = await AutoMessage.find({ where: { clientId } })
     for (const message of messages) {
       if (!message.groupIds.includes(groupJid)) {
         continue
@@ -103,7 +103,7 @@ export const groupService = {
       await message.save()
     }
 
-    const schedules = await NotificationSchedule.find({ where: { ownerPhoneNumber } })
+    const schedules = await NotificationSchedule.find({ where: { clientId } })
     for (const schedule of schedules) {
       if (!schedule.groupJids.includes(groupJid)) {
         continue
@@ -116,15 +116,15 @@ export const groupService = {
       await schedule.save()
     }
 
-    const settings = await BotConfiguration.findOne({ where: { ownerPhoneNumber } })
+    const settings = await BotConfiguration.findOne({ where: { clientId } })
     if (settings?.operationalGroupId === groupJid) {
       settings.operationalGroupId = ''
       await settings.save()
     }
   },
 
-  async setActive(ownerPhoneNumber: string, id: string, isActive: boolean) {
-    const group = await WhatsappGroup.findOne({ where: { id, ownerPhoneNumber } })
+  async setActive(sessionId: string, clientId: string, id: string, isActive: boolean) {
+    const group = await WhatsappGroup.findOne({ where: { id, sessionId } })
     if (!group) {
       throw new Error('Grupo no encontrado.')
     }
@@ -133,14 +133,14 @@ export const groupService = {
     await group.save()
 
     if (!isActive) {
-      await this.deactivateDependencies(ownerPhoneNumber, group.jid)
+      await this.deactivateDependencies(sessionId, clientId, group.jid)
     }
 
     return group
   },
 
-  async resolveGroupName(ownerPhoneNumber: string, jid: string) {
-    const group = await WhatsappGroup.findOne({ where: { ownerPhoneNumber, jid } })
+  async resolveGroupName(sessionId: string, jid: string) {
+    const group = await WhatsappGroup.findOne({ where: { sessionId, jid } })
     return group?.name || null
   },
 }

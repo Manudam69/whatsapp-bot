@@ -3,6 +3,7 @@ import jwt, { SignOptions } from 'jsonwebtoken'
 import { config } from '@/config'
 import { User } from '@/entities/user.entity'
 import { BadRequest, Unauthorized } from '@/middlewares/error_handler'
+import { AppDataSource } from '@/database/datasource'
 
 const KEY_LENGTH = 64
 
@@ -13,6 +14,7 @@ function normalizeEmail(email: string) {
 function sanitizeUser(user: User) {
   return {
     id: user.id,
+    clientId: user.clientId,
     name: user.name,
     email: user.email,
     role: user.role,
@@ -47,7 +49,7 @@ export const authService = {
 
   signToken(user: User) {
     const options: SignOptions = { expiresIn: config.AUTH.TOKEN_EXPIRES_IN as SignOptions['expiresIn'] }
-    return jwt.sign({ sub: user.id, role: user.role, email: user.email }, config.AUTH.JWT_SECRET, options)
+    return jwt.sign({ sub: user.id, role: user.role, email: user.email, clientId: user.clientId }, config.AUTH.JWT_SECRET, options)
   },
 
   async verifyToken(token: string) {
@@ -113,7 +115,15 @@ export const authService = {
       return existing
     }
 
+    // Find the first client to assign the default admin user to
+    const clients = await AppDataSource.query<Array<{ id: string }>>('SELECT "id" FROM "clients" ORDER BY "created_at" ASC LIMIT 1')
+    const clientId = clients[0]?.id
+    if (!clientId) {
+      throw new Error('No clients found. Run migrations before starting the server.')
+    }
+
     return User.save({
+      clientId,
       name: config.AUTH.DEFAULT_ADMIN_NAME,
       email,
       role: 'admin',

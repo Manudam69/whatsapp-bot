@@ -6,8 +6,8 @@ export type DispatchStatus = 'PENDING' | 'SENT' | 'FAILED'
 
 @Entity({ name: 'notification_dispatches' })
 export class NotificationDispatch extends EntityBase {
-  @Column({ name: 'owner_phone_number' })
-  ownerPhoneNumber: string
+  @Column({ name: 'client_id' })
+  clientId: string
 
   @ManyToOne(() => NotificationSchedule, { eager: true, nullable: true, onDelete: 'SET NULL' })
   @JoinColumn({ name: 'schedule_id' })
@@ -16,7 +16,7 @@ export class NotificationDispatch extends EntityBase {
   @Column({ name: 'group_jid' })
   groupJid: string
 
-  @Column({ name: 'group_name', nullable: true })
+  @Column({ name: 'group_name', type: 'varchar', nullable: true })
   groupName?: string
 
   @Column({ default: 'PENDING' })
@@ -31,7 +31,7 @@ export class NotificationDispatch extends EntityBase {
   @Column({ name: 'message_text', type: 'text', nullable: true })
   messageText?: string
 
-  @Column({ name: 'media_asset_path', nullable: true })
+  @Column({ name: 'media_asset_path', type: 'varchar', nullable: true })
   mediaAssetPath?: string
 
   @Column({ name: 'error_message', type: 'text', nullable: true })

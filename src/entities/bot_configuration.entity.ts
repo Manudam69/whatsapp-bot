@@ -80,10 +80,10 @@ function normalizeSettings(input?: Partial<BotConfigurationSettings>): BotConfig
 }
 
 @Entity({ name: 'bot_configurations' })
-@Index('UQ_bot_configurations_owner_phone_number', ['ownerPhoneNumber'], { unique: true })
+@Index('UQ_bot_configurations_client_id', ['clientId'], { unique: true })
 export class BotConfiguration extends EntityBase {
-  @Column({ name: 'owner_phone_number' })
-  ownerPhoneNumber: string
+  @Column({ name: 'client_id' })
+  clientId: string
 
   @Column({ name: 'settings', type: 'jsonb', default: () => "'{}'::jsonb" })
   private settingsData: Partial<BotConfigurationSettings>

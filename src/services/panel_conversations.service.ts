@@ -75,8 +75,8 @@ function outboundStatus(message: OutboundMessage): ConversationMessageStatus {
 }
 
 export const panelConversationsService = {
-  async list(req: Request, ownerPhoneNumber: string, limit?: number) {
-    const contacts = await ClientContact.find({ where: { ownerPhoneNumber }, order: { updatedAt: 'DESC' } })
+  async list(req: Request, clientId: string, limit?: number) {
+    const contacts = await ClientContact.find({ where: { clientId }, order: { updatedAt: 'DESC' } })
 
     if (contacts.length === 0) {
       return []
@@ -84,6 +84,7 @@ export const panelConversationsService = {
 
     const contactIds = contacts.map((contact) => contact.id)
     const contactJids = contacts.map((contact) => contact.whatsappJid)
+    const sessionIds = [...new Set(contacts.map((contact) => contact.sessionId))]
 
     const [inboundMessages, outboundMessages] = await Promise.all([
       InboundMessage.find({
@@ -91,7 +92,7 @@ export const panelConversationsService = {
         order: { receivedAt: 'DESC', createdAt: 'DESC' },
       }),
       OutboundMessage.find({
-        where: { ownerPhoneNumber, recipientJid: In(contactJids) },
+        where: { sessionId: In(sessionIds), recipientJid: In(contactJids) },
         order: { sentAt: 'DESC', lastAttemptAt: 'DESC', createdAt: 'DESC' },
       }),
     ])
@@ -129,6 +130,7 @@ export const panelConversationsService = {
           contactName: contact.contactName || contact.phoneNumber,
           phoneNumber: contact.phoneNumber,
           whatsappJid: contact.whatsappJid,
+          sessionId: contact.sessionId,
           lastMessageAt: formatDate(latestAt),
           lastMessagePreview: isOutboundLatest
             ? outboundPreview(latestOutbound as OutboundMessage)
@@ -145,8 +147,8 @@ export const panelConversationsService = {
     return typeof limit === 'number' ? conversations.slice(0, limit) : conversations
   },
 
-  async getByContactId(req: Request, ownerPhoneNumber: string, contactId: string) {
-    const contact = await ClientContact.findOne({ where: { id: contactId, ownerPhoneNumber } })
+  async getByContactId(req: Request, clientId: string, contactId: string) {
+    const contact = await ClientContact.findOne({ where: { id: contactId, clientId } })
     if (!contact) {
       throw NotFound('Conversación no encontrada.')
     }
@@ -157,7 +159,7 @@ export const panelConversationsService = {
         order: { receivedAt: 'ASC', createdAt: 'ASC' },
       }),
       OutboundMessage.find({
-        where: { ownerPhoneNumber, recipientJid: contact.whatsappJid },
+        where: { sessionId: contact.sessionId, recipientJid: contact.whatsappJid },
         order: { sentAt: 'ASC', lastAttemptAt: 'ASC', createdAt: 'ASC' },
       }),
     ])
@@ -197,6 +199,7 @@ export const panelConversationsService = {
         contactName: contact.contactName || contact.phoneNumber,
         phoneNumber: contact.phoneNumber,
         whatsappJid: contact.whatsappJid,
+        sessionId: contact.sessionId,
         flowStatus: contact.currentFlow,
         lastInboundAt: formatDate(contact.lastInboundAt),
       },

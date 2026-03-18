@@ -2,17 +2,11 @@ import { NextFunction, Request, Response } from 'express'
 import { BadRequest } from '@/middlewares/error_handler'
 import { mediaAssetService } from '@/services/media_asset.service'
 import { panelAdminService } from '@/services/panel_admin.service'
-import { sessionOwnerService } from '@/services/session_owner.service'
 
 export async function listImages(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
-    if (!ownerPhoneNumber) {
-      res.json([])
-      return
-    }
-
-    const assets = await mediaAssetService.list(ownerPhoneNumber)
+    const clientId = req.authUser!.clientId
+    const assets = await mediaAssetService.list(clientId)
     res.json(assets.map((asset) => panelAdminService.mapImage(req, asset)))
   } catch (error) {
     next(error)
@@ -21,12 +15,12 @@ export async function listImages(req: Request, res: Response, next: NextFunction
 
 export async function createImage(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
+    const clientId = req.authUser!.clientId
     if (!req.file) {
       throw BadRequest('Debes adjuntar una imagen.')
     }
 
-    const asset = await mediaAssetService.create(ownerPhoneNumber, {
+    const asset = await mediaAssetService.create(clientId, {
       name: String(req.body?.name || req.file.originalname),
       category: String(req.body?.category || ''),
       fileName: req.file.filename,
@@ -42,9 +36,9 @@ export async function createImage(req: Request, res: Response, next: NextFunctio
 
 export async function deleteImage(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
+    const clientId = req.authUser!.clientId
     const imageId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
-    res.json(await mediaAssetService.remove(ownerPhoneNumber, imageId))
+    res.json(await mediaAssetService.remove(clientId, imageId))
   } catch (error) {
     next(error)
   }
@@ -52,9 +46,9 @@ export async function deleteImage(req: Request, res: Response, next: NextFunctio
 
 export async function updateImage(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
+    const clientId = req.authUser!.clientId
     const imageId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
-    const asset = await mediaAssetService.update(ownerPhoneNumber, imageId, {
+    const asset = await mediaAssetService.update(clientId, imageId, {
       name: req.body?.name,
     })
 

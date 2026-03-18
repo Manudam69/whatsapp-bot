@@ -4,9 +4,9 @@ import { groupService } from './group.service'
 
 type BotConfigurationInput = Partial<BotConfigurationSettings>
 
-function buildDefaultSettings(ownerPhoneNumber: string) {
+function buildDefaultSettings(clientId: string) {
   return BotConfiguration.create({
-    ownerPhoneNumber,
+    clientId,
     settings: {
       retryAttempts: config.MAX_SEND_RETRIES,
     },
@@ -14,20 +14,20 @@ function buildDefaultSettings(ownerPhoneNumber: string) {
 }
 
 export const botConfigurationService = {
-  buildDefaults(ownerPhoneNumber = '') {
-    return buildDefaultSettings(ownerPhoneNumber)
+  buildDefaults(clientId = '') {
+    return buildDefaultSettings(clientId)
   },
 
-  async get(ownerPhoneNumber: string) {
-    const settingsRecord = await BotConfiguration.findOne({ where: { ownerPhoneNumber } })
+  async get(clientId: string, sessionId?: string) {
+    const settingsRecord = await BotConfiguration.findOne({ where: { clientId } })
 
     let settings = settingsRecord
     if (!settings) {
-      settings = await buildDefaultSettings(ownerPhoneNumber).save()
+      settings = await buildDefaultSettings(clientId).save()
     }
 
-    if (settings.operationalGroupId) {
-      const activeOperationalGroupId = await groupService.resolveGroupJid(ownerPhoneNumber, settings.operationalGroupId, { activeOnly: true })
+    if (settings.operationalGroupId && sessionId) {
+      const activeOperationalGroupId = await groupService.resolveGroupJid(sessionId, settings.operationalGroupId, { activeOnly: true })
       if (!activeOperationalGroupId) {
         settings.operationalGroupId = ''
         await settings.save()
@@ -37,12 +37,12 @@ export const botConfigurationService = {
     return settings
   },
 
-  async update(ownerPhoneNumber: string, input: BotConfigurationInput) {
-    const settings = await this.get(ownerPhoneNumber)
+  async update(clientId: string, sessionId: string, input: BotConfigurationInput) {
+    const settings = await this.get(clientId, sessionId)
 
     if (input.operationalGroupId !== undefined) {
       input.operationalGroupId = input.operationalGroupId
-        ? (await groupService.resolveGroupJid(ownerPhoneNumber, input.operationalGroupId, { activeOnly: true })) || ''
+        ? (await groupService.resolveGroupJid(sessionId, input.operationalGroupId, { activeOnly: true })) || ''
         : ''
     }
 

@@ -74,7 +74,7 @@ export function formatReportStatusNotification(
 export const reportService = {
   async createFromInbound(contact: ClientContact, parsed: ParsedIncidentReport, sourceMessage: string) {
     const report = IncidentReport.create({
-      ownerPhoneNumber: contact.ownerPhoneNumber,
+      clientId: contact.clientId,
       folio: buildFolio(),
       contact,
       serviceName: parsed.serviceName,
@@ -97,7 +97,7 @@ export const reportService = {
     report.status = 'FORWARDED'
     report.forwardedAt = new Date()
     report.forwardedGroupJid = groupJid
-    report.forwardedGroupName = (await groupService.resolveGroupName(report.ownerPhoneNumber, groupJid)) || undefined
+    report.forwardedGroupName = (await groupService.resolveGroupName(report.contact.sessionId, groupJid)) || undefined
     await report.save()
     return report
   },
@@ -105,7 +105,7 @@ export const reportService = {
   async markQueued(report: IncidentReport, groupJid: string) {
     report.status = 'QUEUED'
     report.forwardedGroupJid = groupJid
-    report.forwardedGroupName = (await groupService.resolveGroupName(report.ownerPhoneNumber, groupJid)) || undefined
+    report.forwardedGroupName = (await groupService.resolveGroupName(report.contact.sessionId, groupJid)) || undefined
     await report.save()
     return report
   },
@@ -117,20 +117,20 @@ export const reportService = {
     return report
   },
 
-  async list(ownerPhoneNumber: string) {
-    return IncidentReport.find({ where: { ownerPhoneNumber, isArchived: false }, order: { receivedAt: 'DESC' }, take: 100 })
+  async list(clientId: string) {
+    return IncidentReport.find({ where: { clientId, isArchived: false }, order: { receivedAt: 'DESC' }, take: 100 })
   },
 
-  async listArchived(ownerPhoneNumber: string) {
-    return IncidentReport.find({ where: { ownerPhoneNumber, isArchived: true }, order: { receivedAt: 'DESC' }, take: 100 })
+  async listArchived(clientId: string) {
+    return IncidentReport.find({ where: { clientId, isArchived: true }, order: { receivedAt: 'DESC' }, take: 100 })
   },
 
-  async findById(ownerPhoneNumber: string, id: string) {
-    return IncidentReport.findOne({ where: { id, ownerPhoneNumber } })
+  async findById(clientId: string, id: string) {
+    return IncidentReport.findOne({ where: { id, clientId } })
   },
 
-  async setReviewStatus(ownerPhoneNumber: string, id: string, reviewStatus: IncidentReport['reviewStatus']) {
-    const report = await this.findById(ownerPhoneNumber, id)
+  async setReviewStatus(clientId: string, id: string, reviewStatus: IncidentReport['reviewStatus']) {
+    const report = await this.findById(clientId, id)
     if (!report) {
       throw NotFound('Reporte no encontrado.')
     }
@@ -140,8 +140,8 @@ export const reportService = {
     return report
   },
 
-  async setArchived(ownerPhoneNumber: string, id: string, isArchived: boolean) {
-    const report = await this.findById(ownerPhoneNumber, id)
+  async setArchived(clientId: string, id: string, isArchived: boolean) {
+    const report = await this.findById(clientId, id)
     if (!report) {
       throw NotFound('Reporte no encontrado.')
     }

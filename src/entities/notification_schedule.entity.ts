@@ -4,8 +4,8 @@ import { MediaAsset } from './media_asset.entity'
 
 @Entity({ name: 'notification_schedules' })
 export class NotificationSchedule extends EntityBase {
-  @Column({ name: 'owner_phone_number' })
-  ownerPhoneNumber: string
+  @Column({ name: 'client_id' })
+  clientId: string
 
   @Column()
   name: string
@@ -22,7 +22,7 @@ export class NotificationSchedule extends EntityBase {
   @Column({ name: 'group_jids', type: 'jsonb', default: () => "'[]'" })
   groupJids: string[]
 
-  @Column({ name: 'message_template_id', nullable: true })
+  @Column({ name: 'message_template_id', type: 'varchar', nullable: true })
   messageTemplateId?: string
 
   @Column({ name: 'message_template_ids', type: 'jsonb', default: () => "'[]'" })
@@ -37,7 +37,7 @@ export class NotificationSchedule extends EntityBase {
   @Column({ name: 'throttle_ms', default: 1500 })
   throttleMs: number
 
-  @Column({ name: 'last_execution_key', nullable: true })
+  @Column({ name: 'last_execution_key', type: 'varchar', nullable: true })
   lastExecutionKey?: string
 
   @ManyToOne(() => MediaAsset, { eager: true, nullable: true })

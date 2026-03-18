@@ -3,13 +3,13 @@ import { EntityBase } from './entity.base'
 
 @Entity({ name: 'media_assets' })
 export class MediaAsset extends EntityBase {
-  @Column({ name: 'owner_phone_number' })
-  ownerPhoneNumber: string
+  @Column({ name: 'client_id' })
+  clientId: string
 
   @Column()
   name: string
 
-  @Column({ nullable: true })
+  @Column({ type: 'varchar', nullable: true })
   category?: string
 
   @Column({ name: 'file_name' })

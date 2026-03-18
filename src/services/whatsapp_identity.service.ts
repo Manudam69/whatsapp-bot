@@ -36,11 +36,17 @@ function getStringValue(input: unknown, key: string) {
 }
 
 class WhatsappIdentityService {
-  private byLid = new Map<string, string>()
-  private byPhone = new Map<string, string>()
-  private cacheReady = false
+  // Per auth-dir LID maps: authDirKey → { byLid, byPhone }
+  private lidMaps = new Map<string, { byLid: Map<string, string>; byPhone: Map<string, string>; ready: boolean }>()
 
-  resolvePhoneNumberFromJid(jid: string) {
+  private getOrCreateMap(authDirKey: string) {
+    if (!this.lidMaps.has(authDirKey)) {
+      this.lidMaps.set(authDirKey, { byLid: new Map(), byPhone: new Map(), ready: false })
+    }
+    return this.lidMaps.get(authDirKey)!
+  }
+
+  resolvePhoneNumberFromJid(jid: string, authDirKey?: string) {
     const [localPart, domain = ''] = jid.split('@')
     if (!localPart) {
       return ''
@@ -50,21 +56,33 @@ class WhatsappIdentityService {
       return normalizePhoneNumber(localPart)
     }
 
-    this.loadMappings()
+    if (!authDirKey) {
+      return localPart
+    }
 
-    const resolved = this.byLid.get(localPart)
+    this.loadMappings(authDirKey)
+
+    const map = this.getOrCreateMap(authDirKey)
+    const resolved = map.byLid.get(localPart)
     if (resolved) {
       return resolved
     }
 
-    this.loadMappings(true)
-    return this.byLid.get(localPart) || localPart
+    this.loadMappings(authDirKey, true)
+    return map.byLid.get(localPart) || localPart
   }
 
-  async upsertContactFromInbound(ownerPhoneNumber: string, jid: string, contactName?: string, rawPayload?: Record<string, unknown>) {
-    const phoneNumber = this.resolvePhoneNumber(jid, rawPayload)
-    const existingByJid = await ClientContact.findOne({ where: { ownerPhoneNumber, whatsappJid: jid } })
-    const existingByPhone = phoneNumber ? await ClientContact.findOne({ where: { ownerPhoneNumber, phoneNumber } }) : null
+  async upsertContactFromInbound(
+    sessionId: string,
+    clientId: string,
+    jid: string,
+    authDirKey: string,
+    contactName?: string,
+    rawPayload?: Record<string, unknown>,
+  ) {
+    const phoneNumber = this.resolvePhoneNumber(jid, authDirKey, rawPayload)
+    const existingByJid = await ClientContact.findOne({ where: { sessionId, whatsappJid: jid } })
+    const existingByPhone = phoneNumber ? await ClientContact.findOne({ where: { sessionId, phoneNumber } }) : null
 
     if (existingByJid && existingByPhone && existingByJid.id !== existingByPhone.id) {
       return this.mergeContacts(existingByJid, existingByPhone, jid, phoneNumber, contactName)
@@ -72,7 +90,8 @@ class WhatsappIdentityService {
 
     const contact = existingByJid || existingByPhone
     if (contact) {
-      contact.ownerPhoneNumber = ownerPhoneNumber
+      contact.clientId = clientId
+      contact.sessionId = sessionId
       contact.phoneNumber = phoneNumber
       contact.whatsappJid = jid
       contact.contactName = contactName || contact.contactName
@@ -82,7 +101,8 @@ class WhatsappIdentityService {
     }
 
     const created = ClientContact.create({
-      ownerPhoneNumber,
+      clientId,
+      sessionId,
       phoneNumber,
       whatsappJid: jid,
       contactName,
@@ -94,17 +114,25 @@ class WhatsappIdentityService {
     return created
   }
 
-  async repairStoredContacts(ownerPhoneNumber: string) {
-    if (!ownerPhoneNumber) {
+  async repairStoredContacts(sessionId: string, phoneNumber?: string | null) {
+    if (!sessionId) {
       return 0
     }
 
-    const contacts = await ClientContact.find({ where: { ownerPhoneNumber } })
+    // Get authDirKey from DB for this session
+    const { AppDataSource: ds } = await import('@/database/datasource')
+    const rows = await ds.query<Array<{ auth_dir_key: string }>>(
+      `SELECT "auth_dir_key" FROM "whatsapp_sessions" WHERE "id" = $1`,
+      [sessionId],
+    )
+    const authDirKey = rows[0]?.auth_dir_key || sessionId
+
+    const contacts = await ClientContact.find({ where: { sessionId } })
     let repairedCount = 0
     let unresolvedCount = 0
 
     for (const contact of contacts) {
-      const resolvedPhoneNumber = await this.resolveStoredPhoneNumber(contact)
+      const resolvedPhoneNumber = await this.resolveStoredPhoneNumber(contact, authDirKey)
       if (!resolvedPhoneNumber || resolvedPhoneNumber === contact.phoneNumber) {
         if (contact.whatsappJid.endsWith('@lid') && getJidLocalPart(contact.whatsappJid) === contact.phoneNumber) {
           unresolvedCount += 1
@@ -113,7 +141,7 @@ class WhatsappIdentityService {
         continue
       }
 
-      const duplicate = await ClientContact.findOne({ where: { ownerPhoneNumber, phoneNumber: resolvedPhoneNumber } })
+      const duplicate = await ClientContact.findOne({ where: { sessionId, phoneNumber: resolvedPhoneNumber } })
       if (duplicate && duplicate.id !== contact.id) {
         await this.mergeContacts(contact, duplicate, contact.whatsappJid, resolvedPhoneNumber, contact.contactName)
       } else {
@@ -125,18 +153,18 @@ class WhatsappIdentityService {
     }
 
     if (repairedCount > 0) {
-      logger.info(`Repaired ${repairedCount} WhatsApp contact phone number mappings.`)
+      logger.info(`[Session ${sessionId}] Repaired ${repairedCount} WhatsApp contact phone number mappings.`)
     }
 
     if (unresolvedCount > 0) {
-      logger.warn(`Found ${unresolvedCount} WhatsApp contacts with unresolved LID mappings.`)
+      logger.warn(`[Session ${sessionId}] Found ${unresolvedCount} WhatsApp contacts with unresolved LID mappings.`)
     }
 
     return repairedCount
   }
 
-  private resolvePhoneNumber(jid: string, rawPayload?: Record<string, unknown>) {
-    const resolvedFromJid = this.resolvePhoneNumberFromJid(jid)
+  private resolvePhoneNumber(jid: string, authDirKey: string, rawPayload?: Record<string, unknown>) {
+    const resolvedFromJid = this.resolvePhoneNumberFromJid(jid, authDirKey)
     if (!jid.endsWith('@lid')) {
       return resolvedFromJid
     }
@@ -146,10 +174,10 @@ class WhatsappIdentityService {
       return resolvedFromJid
     }
 
-    return this.resolvePhoneNumberFromPayload(rawPayload) || resolvedFromJid
+    return this.resolvePhoneNumberFromPayload(rawPayload, authDirKey) || resolvedFromJid
   }
 
-  private resolvePhoneNumberFromPayload(rawPayload?: Record<string, unknown>) {
+  private resolvePhoneNumberFromPayload(rawPayload: Record<string, unknown> | undefined, authDirKey: string) {
     if (!rawPayload) {
       return ''
     }
@@ -157,19 +185,19 @@ class WhatsappIdentityService {
     const key = rawPayload.key
     const remoteJidAlt = getStringValue(key, 'remoteJidAlt')
     if (remoteJidAlt) {
-      return this.resolvePhoneNumberFromJid(remoteJidAlt)
+      return this.resolvePhoneNumberFromJid(remoteJidAlt, authDirKey)
     }
 
     const participantAlt = getStringValue(key, 'participantAlt')
     if (participantAlt) {
-      return this.resolvePhoneNumberFromJid(participantAlt)
+      return this.resolvePhoneNumberFromJid(participantAlt, authDirKey)
     }
 
     return ''
   }
 
-  private async resolveStoredPhoneNumber(contact: ClientContact) {
-    const resolvedFromJid = this.resolvePhoneNumberFromJid(contact.whatsappJid)
+  private async resolveStoredPhoneNumber(contact: ClientContact, authDirKey: string) {
+    const resolvedFromJid = this.resolvePhoneNumberFromJid(contact.whatsappJid, authDirKey)
     const lid = getJidLocalPart(contact.whatsappJid)
 
     if (!contact.whatsappJid.endsWith('@lid') || !resolvedFromJid || resolvedFromJid !== lid) {
@@ -181,20 +209,21 @@ class WhatsappIdentityService {
       .orderBy('message.received_at', 'DESC')
       .getOne()
 
-    return this.resolvePhoneNumberFromPayload(latestInbound?.rawPayload) || resolvedFromJid
+    return this.resolvePhoneNumberFromPayload(latestInbound?.rawPayload, authDirKey) || resolvedFromJid
   }
 
-  private loadMappings(forceReload = false) {
-    if (this.cacheReady && !forceReload) {
+  private loadMappings(authDirKey: string, forceReload = false) {
+    const map = this.getOrCreateMap(authDirKey)
+    if (map.ready && !forceReload) {
       return
     }
 
-    this.byLid.clear()
-    this.byPhone.clear()
+    map.byLid.clear()
+    map.byPhone.clear()
 
-    const authDir = path.resolve(process.cwd(), config.SESSION_AUTH_DIR)
+    const authDir = path.resolve(process.cwd(), config.SESSION_AUTH_DIR, authDirKey)
     if (!fs.existsSync(authDir)) {
-      this.cacheReady = true
+      map.ready = true
       return
     }
 
@@ -210,18 +239,18 @@ class WhatsappIdentityService {
       if (baseName.endsWith('_reverse')) {
         const lid = normalizePhoneNumber(baseName.slice(0, -'_reverse'.length))
         const phone = value
-        this.byLid.set(lid, phone)
-        this.byPhone.set(phone, lid)
+        map.byLid.set(lid, phone)
+        map.byPhone.set(phone, lid)
         continue
       }
 
       const phone = normalizePhoneNumber(baseName)
       const lid = value
-      this.byPhone.set(phone, lid)
-      this.byLid.set(lid, phone)
+      map.byPhone.set(phone, lid)
+      map.byLid.set(lid, phone)
     }
 
-    this.cacheReady = true
+    map.ready = true
   }
 
   private async mergeContacts(primary: ClientContact, secondary: ClientContact, jid: string, phoneNumber: string, contactName?: string) {
@@ -229,7 +258,8 @@ class WhatsappIdentityService {
       await manager.query('UPDATE inbound_messages SET contact_id = $1 WHERE contact_id = $2', [primary.id, secondary.id])
       await manager.query('UPDATE incident_reports SET contact_id = $1 WHERE contact_id = $2', [primary.id, secondary.id])
 
-      primary.ownerPhoneNumber = primary.ownerPhoneNumber || secondary.ownerPhoneNumber
+      primary.clientId = primary.clientId || secondary.clientId
+      primary.sessionId = primary.sessionId || secondary.sessionId
       primary.phoneNumber = phoneNumber
       primary.whatsappJid = jid
       primary.contactName = contactName || primary.contactName || secondary.contactName

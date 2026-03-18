@@ -7,7 +7,6 @@ import { groupService } from './group.service'
 import { reportService, formatReportMessage } from './report.service'
 import { whatsappIdentityService } from './whatsapp_identity.service'
 import logger from '@/utils/logger'
-import { sessionOwnerService } from './session_owner.service'
 
 const INITIAL_PROMPT =
   '*ASISTENTE DE REPORTES*\n\nSe capturara la informacion *paso a paso*.\n\nSi deseas cancelar la captura, escribe *CANCELAR*.'
@@ -107,25 +106,28 @@ function buildConfirmationMessage(contact: ClientContact) {
 }
 
 async function startCapture(contact: ClientContact, jid: string) {
-  const settings = await botConfigurationService.get(contact.ownerPhoneNumber)
+  const settings = await botConfigurationService.get(contact.clientId, contact.sessionId)
   resetDraft(contact)
   contact.currentFlow = 'AWAITING_REPORT'
   await contact.save()
   if (settings.firstReplyEnabled) {
     await outboundMessageService.queueText({
-      ownerPhoneNumber: contact.ownerPhoneNumber,
+      sessionId: contact.sessionId,
       recipientJid: jid,
       text: settings.firstReplyText?.trim() || INITIAL_PROMPT,
       sourceType: 'FLOW_REPLY',
     })
   } else {
-    await outboundMessageService.queueText({ ownerPhoneNumber: contact.ownerPhoneNumber, recipientJid: jid, text: INITIAL_PROMPT, sourceType: 'FLOW_REPLY' })
+    await outboundMessageService.queueText({ sessionId: contact.sessionId, recipientJid: jid, text: INITIAL_PROMPT, sourceType: 'FLOW_REPLY' })
   }
-  await outboundMessageService.queueText({ ownerPhoneNumber: contact.ownerPhoneNumber, recipientJid: jid, text: PROMPTS.service, sourceType: 'FLOW_REPLY' })
+  await outboundMessageService.queueText({ sessionId: contact.sessionId, recipientJid: jid, text: PROMPTS.service, sourceType: 'FLOW_REPLY' })
 }
 
 export const inboundMessageService = {
   async processIncomingText(input: {
+    sessionId: string
+    clientId: string
+    authDirKey: string
     fromJid: string
     text: string
     externalMessageId?: string
@@ -144,17 +146,18 @@ export const inboundMessageService = {
       }
     }
 
-    const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
-    if (!ownerPhoneNumber) {
-      logger.warn('Inbound message ignored because there is no active owner phone number associated with the WhatsApp session.')
-      return
-    }
-
-    const contact = await whatsappIdentityService.upsertContactFromInbound(ownerPhoneNumber, input.fromJid, input.contactName, input.rawPayload)
+    const contact = await whatsappIdentityService.upsertContactFromInbound(
+      input.sessionId,
+      input.clientId,
+      input.fromJid,
+      input.authDirKey,
+      input.contactName,
+      input.rawPayload,
+    )
     normalizeFlow(contact)
 
     await InboundMessage.save({
-      ownerPhoneNumber,
+      sessionId: input.sessionId,
       contact,
       externalMessageId: input.externalMessageId,
       fromJid: input.fromJid,
@@ -164,10 +167,12 @@ export const inboundMessageService = {
       rawPayload: input.rawPayload,
     })
 
+    const { sessionId, clientId } = input
+
     if (trimmedText.toUpperCase() === CANCEL_COMMAND) {
       resetDraft(contact)
       await contact.save()
-      await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: PROMPTS.cancelled, sourceType: 'FLOW_REPLY' })
+      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.cancelled, sourceType: 'FLOW_REPLY' })
       return
     }
 
@@ -177,7 +182,6 @@ export const inboundMessageService = {
     }
 
     // Discard messages sent before the user sees the Paso 1 prompt.
-    // startCapture saves AWAITING_REPORT; transition to AWAITING_SERVICE and ignore the message.
     if (contact.currentFlow === 'AWAITING_REPORT') {
       contact.currentFlow = 'AWAITING_SERVICE'
       await contact.save()
@@ -186,49 +190,49 @@ export const inboundMessageService = {
 
     if (contact.currentFlow === 'AWAITING_SERVICE') {
       if (trimmedText.length < SERVICE_MIN_LENGTH) {
-        await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: PROMPTS.invalidService, sourceType: 'FLOW_REPLY' })
+        await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.invalidService, sourceType: 'FLOW_REPLY' })
         return
       }
       contact.draftServiceName = trimmedText
       contact.currentFlow = 'AWAITING_DATE'
       await contact.save()
-      await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: PROMPTS.date, sourceType: 'FLOW_REPLY' })
+      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.date, sourceType: 'FLOW_REPLY' })
       return
     }
 
     if (contact.currentFlow === 'AWAITING_DATE') {
       if (!isValidDate(trimmedText)) {
-        await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: pickVariant(INVALID_DATE_VARIANTS), sourceType: 'FLOW_REPLY' })
+        await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: pickVariant(INVALID_DATE_VARIANTS), sourceType: 'FLOW_REPLY' })
         return
       }
       contact.draftIncidentDate = trimmedText
       contact.currentFlow = 'AWAITING_TIME'
       await contact.save()
-      await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: PROMPTS.time, sourceType: 'FLOW_REPLY' })
+      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.time, sourceType: 'FLOW_REPLY' })
       return
     }
 
     if (contact.currentFlow === 'AWAITING_TIME') {
       if (!isValidTime(trimmedText)) {
-        await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: pickVariant(INVALID_TIME_VARIANTS), sourceType: 'FLOW_REPLY' })
+        await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: pickVariant(INVALID_TIME_VARIANTS), sourceType: 'FLOW_REPLY' })
         return
       }
       contact.draftIncidentTime = trimmedText
       contact.currentFlow = 'AWAITING_INCIDENT'
       await contact.save()
-      await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: PROMPTS.incident, sourceType: 'FLOW_REPLY' })
+      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.incident, sourceType: 'FLOW_REPLY' })
       return
     }
 
     if (contact.currentFlow === 'AWAITING_INCIDENT') {
       if (trimmedText.length < INCIDENT_MIN_LENGTH) {
-        await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: PROMPTS.invalidIncident, sourceType: 'FLOW_REPLY' })
+        await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.invalidIncident, sourceType: 'FLOW_REPLY' })
         return
       }
       contact.draftIncidentText = trimmedText
       contact.currentFlow = 'AWAITING_CONFIRMATION'
       await contact.save()
-      await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: buildConfirmationMessage(contact), sourceType: 'FLOW_REPLY' })
+      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: buildConfirmationMessage(contact), sourceType: 'FLOW_REPLY' })
       return
     }
 
@@ -245,13 +249,13 @@ export const inboundMessageService = {
       contact.draftIncidentTime = undefined
       contact.draftIncidentText = undefined
       await contact.save()
-      await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: PROMPTS.restart, sourceType: 'FLOW_REPLY' })
-      await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: PROMPTS.service, sourceType: 'FLOW_REPLY' })
+      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.restart, sourceType: 'FLOW_REPLY' })
+      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.service, sourceType: 'FLOW_REPLY' })
       return
     }
 
     if (normalizedConfirmation !== 'SI' && normalizedConfirmation !== 'SÍ') {
-      await outboundMessageService.queueText({ ownerPhoneNumber, recipientJid: input.fromJid, text: PROMPTS.invalidConfirmation, sourceType: 'FLOW_REPLY' })
+      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.invalidConfirmation, sourceType: 'FLOW_REPLY' })
       return
     }
 
@@ -259,10 +263,10 @@ export const inboundMessageService = {
     const sourceMessage = `Servicio: ${parsed.serviceName} | Fecha: ${parsed.incidentDate} | Hora: ${parsed.incidentTime} | Incidencia: ${parsed.incidentText}`
 
     const report = await reportService.createFromInbound(contact, parsed, sourceMessage)
-    const settings = await botConfigurationService.get(ownerPhoneNumber)
+    const settings = await botConfigurationService.get(clientId, sessionId)
     const configuredOperationsGroupJid = settings.operationalGroupId || reportService.getOperationsGroupJid()
     const operationsGroupJid = configuredOperationsGroupJid
-      ? await groupService.resolveGroupJid(ownerPhoneNumber, configuredOperationsGroupJid, { activeOnly: true })
+      ? await groupService.resolveGroupJid(sessionId, configuredOperationsGroupJid, { activeOnly: true })
       : null
 
     try {
@@ -272,7 +276,7 @@ export const inboundMessageService = {
 
       await reportService.markQueued(report, operationsGroupJid)
       await outboundMessageService.queueText({
-        ownerPhoneNumber,
+        sessionId,
         recipientJid: operationsGroupJid,
         text: formatReportMessage(report),
         sourceType: 'REPORT_FORWARD',
@@ -283,7 +287,7 @@ export const inboundMessageService = {
       await contact.save()
       if (settings.confirmationEnabled) {
         await outboundMessageService.queueText({
-          ownerPhoneNumber,
+          sessionId,
           recipientJid: input.fromJid,
           text: fillTemplate(PROMPTS.confirmed, { folio: report.folio }),
           sourceType: 'FLOW_REPLY',
@@ -296,7 +300,7 @@ export const inboundMessageService = {
       await contact.save()
       if (settings.confirmationEnabled) {
         await outboundMessageService.queueText({
-          ownerPhoneNumber,
+          sessionId,
           recipientJid: input.fromJid,
           text: fillTemplate(PROMPTS.confirmed, { folio: report.folio }),
           sourceType: 'FLOW_REPLY',

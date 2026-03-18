@@ -1,24 +1,33 @@
 import { NextFunction, Request, Response } from 'express'
+import { In, Raw } from 'typeorm'
 import { NotificationDispatch } from '@/entities/notification_dispatch.entity'
 import { OutboundMessage } from '@/entities/outbound_message.entity'
 import { groupService } from '@/services/group.service'
 import { notificationScheduleService } from '@/services/notification_schedule.service'
 import { panelAdminService } from '@/services/panel_admin.service'
-import { sessionOwnerService } from '@/services/session_owner.service'
-import { whatsappService } from '@/services/whatsapp.service'
+import { whatsappSessionManager } from '@/services/whatsapp_session_manager.service'
 import { NotFound } from '@/middlewares/error_handler'
-import { Raw } from 'typeorm'
 import logger from '@/utils/logger'
 import { sleep } from '@/utils/sleep'
 
 const REVOKE_DELAY_MS = 800
 
-async function normalizeScheduleGroups(ownerPhoneNumber: string, scheduleId: string, groupJids: string[]) {
-  const normalized = Array.from(new Set(await groupService.resolveGroupJids(ownerPhoneNumber, groupJids, { activeOnly: true })))
+function getFirstSessionId(clientId: string): string | undefined {
+  const sessions = whatsappSessionManager.getSessionsByClientId(clientId)
+  const connected = sessions.find((s) => s.isConnected())
+  return (connected ?? sessions[0])?.sessionId
+}
+
+function getClientSessionIds(clientId: string): string[] {
+  return whatsappSessionManager.getSessionsByClientId(clientId).map((s) => s.sessionId)
+}
+
+async function normalizeScheduleGroups(clientId: string, sessionId: string, scheduleId: string, groupJids: string[]) {
+  const normalized = Array.from(new Set(await groupService.resolveGroupJids(sessionId, groupJids, { activeOnly: true })))
   const shouldDeactivate = normalized.length === 0
 
   if (normalized.length !== groupJids.length || normalized.some((value, index) => value !== groupJids[index])) {
-    await notificationScheduleService.update(ownerPhoneNumber, scheduleId, {
+    await notificationScheduleService.update(clientId, scheduleId, {
       groupJids: normalized,
       isActive: shouldDeactivate ? false : undefined,
     })
@@ -27,9 +36,9 @@ async function normalizeScheduleGroups(ownerPhoneNumber: string, scheduleId: str
   return { groupJids: normalized, isActive: shouldDeactivate ? false : undefined }
 }
 
-async function mapScheduleResponse(ownerPhoneNumber: string, scheduleId: string) {
-  const schedule = await notificationScheduleService.findById(ownerPhoneNumber, scheduleId)
-  const lastDispatch = await NotificationDispatch.findOne({ where: { ownerPhoneNumber, schedule: { id: schedule.id } }, order: { executedAt: 'DESC' } })
+async function mapScheduleResponse(clientId: string, scheduleId: string) {
+  const schedule = await notificationScheduleService.findById(clientId, scheduleId)
+  const lastDispatch = await NotificationDispatch.findOne({ where: { clientId, schedule: { id: schedule.id } }, order: { executedAt: 'DESC' } })
   return panelAdminService.mapSchedule(schedule, lastDispatch)
 }
 
@@ -44,16 +53,13 @@ function normalizePayload(body: Record<string, unknown>) {
   }
 }
 
-export async function listSchedules(_req: Request, res: Response, next: NextFunction) {
+export async function listSchedules(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
-    if (!ownerPhoneNumber) {
-      res.json([])
-      return
-    }
+    const clientId = req.authUser!.clientId
+    const sessionId = getFirstSessionId(clientId)
 
-    const schedules = await notificationScheduleService.list(ownerPhoneNumber)
-    const dispatches = await notificationScheduleService.listDispatchHistory(ownerPhoneNumber, 500)
+    const schedules = await notificationScheduleService.list(clientId)
+    const dispatches = await notificationScheduleService.listDispatchHistory(clientId, 500)
     const lastDispatchBySchedule = new Map<string, NotificationDispatch>()
 
     for (const dispatch of dispatches) {
@@ -63,11 +69,13 @@ export async function listSchedules(_req: Request, res: Response, next: NextFunc
       lastDispatchBySchedule.set(dispatch.schedule.id, dispatch)
     }
 
-    for (const schedule of schedules) {
-      const normalized = await normalizeScheduleGroups(ownerPhoneNumber, schedule.id, schedule.groupJids || [])
-      schedule.groupJids = normalized.groupJids
-      if (normalized.isActive !== undefined) {
-        schedule.isActive = normalized.isActive
+    if (sessionId) {
+      for (const schedule of schedules) {
+        const normalized = await normalizeScheduleGroups(clientId, sessionId, schedule.id, schedule.groupJids || [])
+        schedule.groupJids = normalized.groupJids
+        if (normalized.isActive !== undefined) {
+          schedule.isActive = normalized.isActive
+        }
       }
     }
 
@@ -79,17 +87,21 @@ export async function listSchedules(_req: Request, res: Response, next: NextFunc
 
 export async function createSchedule(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
+    const clientId = req.authUser!.clientId
+    const sessionId = getFirstSessionId(clientId)
     const payload = normalizePayload(req.body ?? {})
-    const groupJids = await groupService.resolveGroupJids(ownerPhoneNumber, payload.groupIds, { activeOnly: true })
-    const schedule = await notificationScheduleService.create(ownerPhoneNumber, {
+    const groupJids = sessionId
+      ? await groupService.resolveGroupJids(sessionId, payload.groupIds, { activeOnly: true })
+      : payload.groupIds
+
+    const schedule = await notificationScheduleService.create(clientId, {
       name: payload.name,
       daysOfWeek: panelAdminService.toScheduleDays(payload.days),
       times: [payload.time],
       groupJids,
       messageTemplateIds: payload.messageIds,
     })
-    res.status(201).json(await mapScheduleResponse(ownerPhoneNumber, schedule.id))
+    res.status(201).json(await mapScheduleResponse(clientId, schedule.id))
   } catch (error) {
     next(error)
   }
@@ -97,18 +109,22 @@ export async function createSchedule(req: Request, res: Response, next: NextFunc
 
 export async function updateSchedule(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
+    const clientId = req.authUser!.clientId
+    const sessionId = getFirstSessionId(clientId)
     const scheduleId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
     const payload = normalizePayload(req.body ?? {})
-    const groupJids = await groupService.resolveGroupJids(ownerPhoneNumber, payload.groupIds, { activeOnly: true })
-    await notificationScheduleService.update(ownerPhoneNumber, scheduleId, {
+    const groupJids = sessionId
+      ? await groupService.resolveGroupJids(sessionId, payload.groupIds, { activeOnly: true })
+      : payload.groupIds
+
+    await notificationScheduleService.update(clientId, scheduleId, {
       name: payload.name,
       daysOfWeek: panelAdminService.toScheduleDays(payload.days),
       times: [payload.time],
       groupJids,
       messageTemplateIds: payload.messageIds,
     })
-    res.json(await mapScheduleResponse(ownerPhoneNumber, scheduleId))
+    res.json(await mapScheduleResponse(clientId, scheduleId))
   } catch (error) {
     next(error)
   }
@@ -116,9 +132,9 @@ export async function updateSchedule(req: Request, res: Response, next: NextFunc
 
 export async function deleteSchedule(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
+    const clientId = req.authUser!.clientId
     const scheduleId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
-    res.json(await notificationScheduleService.remove(ownerPhoneNumber, scheduleId))
+    res.json(await notificationScheduleService.remove(clientId, scheduleId))
   } catch (error) {
     next(error)
   }
@@ -126,19 +142,18 @@ export async function deleteSchedule(req: Request, res: Response, next: NextFunc
 
 export async function getDispatchHistory(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
-    if (!ownerPhoneNumber) {
-      res.json([])
-      return
-    }
+    const clientId = req.authUser!.clientId
+    const sessionIds = getClientSessionIds(clientId)
 
-    const history = await notificationScheduleService.listDispatchHistory(ownerPhoneNumber)
+    const history = await notificationScheduleService.listDispatchHistory(clientId)
 
-    // Batch-fetch sent outbound messages to determine which dispatches have a stored WA message ID
-    const sentMessages = await OutboundMessage.find({
-      where: { ownerPhoneNumber, sourceType: 'SCHEDULE', status: 'SENT' },
-      select: ['metadata'],
-    })
+    const sentMessages = sessionIds.length > 0
+      ? await OutboundMessage.find({
+        where: { sessionId: In(sessionIds), sourceType: 'SCHEDULE', status: 'SENT' },
+        select: ['metadata'],
+      })
+      : []
+
     const revocableDispatchIds = new Set(
       sentMessages
         .filter((m) => typeof m.metadata?.dispatchId === 'string' && typeof m.metadata?.whatsappMessageId === 'string')
@@ -151,23 +166,26 @@ export async function getDispatchHistory(req: Request, res: Response, next: Next
   }
 }
 
-async function revokeDispatchFromWhatsapp(ownerPhoneNumber: string, dispatchId: string): Promise<void> {
+async function revokeDispatchFromWhatsapp(_clientId: string, sessionIds: string[], dispatchId: string): Promise<void> {
+  if (sessionIds.length === 0) return
+
   const outboundMessages = await OutboundMessage.find({
     where: {
-      ownerPhoneNumber,
+      sessionId: In(sessionIds),
       sourceType: 'SCHEDULE',
       status: 'SENT',
       metadata: Raw((alias) => `${alias} @> :meta::jsonb`, { meta: JSON.stringify({ dispatchId }) }),
     },
   })
 
-  if (!whatsappService.isConnected()) return
-
   for (const msg of outboundMessages) {
+    const session = whatsappSessionManager.getSession(msg.sessionId)
+    if (!session?.isConnected()) continue
+
     const waMessageId = typeof msg.metadata?.whatsappMessageId === 'string' ? msg.metadata.whatsappMessageId : undefined
     if (waMessageId) {
       try {
-        await whatsappService.deleteMessageNow(msg.recipientJid, waMessageId)
+        await session.deleteMessageNow(msg.recipientJid, waMessageId)
       } catch (err) {
         logger.warn(`revokeDispatch: failed to delete WA message ${waMessageId} in ${msg.recipientJid}: ${err instanceof Error ? err.message : String(err)}`)
       }
@@ -177,12 +195,13 @@ async function revokeDispatchFromWhatsapp(ownerPhoneNumber: string, dispatchId: 
 
 export async function deleteDispatch(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
+    const clientId = req.authUser!.clientId
+    const sessionIds = getClientSessionIds(clientId)
     const dispatchId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
-    const dispatch = await NotificationDispatch.findOne({ where: { id: dispatchId, ownerPhoneNumber } })
+    const dispatch = await NotificationDispatch.findOne({ where: { id: dispatchId, clientId } })
     if (!dispatch) throw NotFound('Registro no encontrado')
 
-    await revokeDispatchFromWhatsapp(ownerPhoneNumber, dispatchId)
+    await revokeDispatchFromWhatsapp(clientId, sessionIds, dispatchId)
     await dispatch.remove()
     res.json({ success: true })
   } catch (error) {
@@ -192,16 +211,17 @@ export async function deleteDispatch(req: Request, res: Response, next: NextFunc
 
 export async function deleteDispatchBatch(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
+    const clientId = req.authUser!.clientId
+    const sessionIds = getClientSessionIds(clientId)
     const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : []
 
     let deleted = 0
     for (let i = 0; i < ids.length; i++) {
       const dispatchId = ids[i]!
-      const dispatch = await NotificationDispatch.findOne({ where: { id: dispatchId, ownerPhoneNumber } })
+      const dispatch = await NotificationDispatch.findOne({ where: { id: dispatchId, clientId } })
       if (!dispatch) continue
 
-      await revokeDispatchFromWhatsapp(ownerPhoneNumber, dispatchId)
+      await revokeDispatchFromWhatsapp(clientId, sessionIds, dispatchId)
       await dispatch.remove()
       deleted++
 
@@ -216,11 +236,11 @@ export async function deleteDispatchBatch(req: Request, res: Response, next: Nex
 
 export async function toggleSchedule(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
+    const clientId = req.authUser!.clientId
     const scheduleId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
     const isActive = req.path.endsWith('/activate')
-    await notificationScheduleService.update(ownerPhoneNumber, scheduleId, { isActive })
-    res.json(await mapScheduleResponse(ownerPhoneNumber, scheduleId))
+    await notificationScheduleService.update(clientId, scheduleId, { isActive })
+    res.json(await mapScheduleResponse(clientId, scheduleId))
   } catch (error) {
     next(error)
   }

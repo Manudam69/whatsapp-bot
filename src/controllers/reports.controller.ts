@@ -1,17 +1,11 @@
 import { NextFunction, Request, Response } from 'express'
 import { NotFound } from '@/middlewares/error_handler'
 import { reportService } from '@/services/report.service'
-import { sessionOwnerService } from '@/services/session_owner.service'
 
 export async function listReports(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
-    if (!ownerPhoneNumber) {
-      res.json([])
-      return
-    }
-
-    const reports = await reportService.list(ownerPhoneNumber)
+    const clientId = req.authUser!.clientId
+    const reports = await reportService.list(clientId)
     res.json(reports)
   } catch (error) {
     next(error)
@@ -20,9 +14,9 @@ export async function listReports(req: Request, res: Response, next: NextFunctio
 
 export async function getReport(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
+    const clientId = req.authUser!.clientId
     const reportId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
-    const report = await reportService.findById(ownerPhoneNumber, reportId)
+    const report = await reportService.findById(clientId, reportId)
     if (!report) {
       throw NotFound('Reporte no encontrado.')
     }

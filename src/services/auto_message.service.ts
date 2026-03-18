@@ -27,27 +27,27 @@ async function assignImage(message: AutoMessage, imageId?: string | null) {
     return
   }
 
-  message.image = imageId ? await mediaAssetService.findById(message.ownerPhoneNumber, imageId) : null
+  message.image = imageId ? await mediaAssetService.findById(message.clientId, imageId) : null
 }
 
 export const autoMessageService = {
-  async list(ownerPhoneNumber: string) {
-    return AutoMessage.find({ where: { ownerPhoneNumber }, order: { createdAt: 'DESC' } })
+  async list(clientId: string) {
+    return AutoMessage.find({ where: { clientId }, order: { createdAt: 'DESC' } })
   },
 
-  async findById(ownerPhoneNumber: string, id: string) {
-    const message = await AutoMessage.findOne({ where: { id, ownerPhoneNumber } })
+  async findById(clientId: string, id: string) {
+    const message = await AutoMessage.findOne({ where: { id, clientId } })
     if (!message) {
       throw NotFound('Mensaje no encontrado.')
     }
     return message
   },
 
-  async create(ownerPhoneNumber: string, input: AutoMessageInput) {
+  async create(clientId: string, input: AutoMessageInput) {
     validate(input)
 
     const message = AutoMessage.create({
-      ownerPhoneNumber,
+      clientId,
       name: input.name.trim(),
       content: input.content.trim(),
       type: input.type,
@@ -59,8 +59,8 @@ export const autoMessageService = {
     return message
   },
 
-  async update(ownerPhoneNumber: string, id: string, input: Partial<AutoMessageInput>) {
-    const message = await this.findById(ownerPhoneNumber, id)
+  async update(clientId: string, id: string, input: Partial<AutoMessageInput>) {
+    const message = await this.findById(clientId, id)
 
     if (input.name !== undefined) {
       message.name = input.name.trim()
@@ -89,8 +89,8 @@ export const autoMessageService = {
     return message
   },
 
-  async remove(ownerPhoneNumber: string, id: string) {
-    const message = await this.findById(ownerPhoneNumber, id)
+  async remove(clientId: string, id: string) {
+    const message = await this.findById(clientId, id)
     await message.remove()
     return { success: true }
   },

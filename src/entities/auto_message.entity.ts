@@ -6,8 +6,8 @@ export type AutoMessageType = 'text' | 'image'
 
 @Entity({ name: 'auto_messages' })
 export class AutoMessage extends EntityBase {
-  @Column({ name: 'owner_phone_number' })
-  ownerPhoneNumber: string
+  @Column({ name: 'client_id' })
+  clientId: string
 
   @Column()
   name: string

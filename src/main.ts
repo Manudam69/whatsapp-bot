@@ -13,7 +13,7 @@ import { initFileBasedRoutes } from '@/utils/file_routes'
 import { changePassword, login } from '@/controllers/auth.controller'
 import { authService } from '@/services/auth.service'
 import { schedulerService } from '@/services/scheduler.service'
-import { whatsappService } from '@/services/whatsapp.service'
+import { whatsappSessionManager } from '@/services/whatsapp_session_manager.service'
 import { initAntibanService } from '@/services/antiban.service'
 
 const app = express()
@@ -67,7 +67,7 @@ async function bootstrap() {
 
   const server = app.listen(config.PORT, async () => {
     logger.info(`Server listening on http://localhost:${config.PORT}`)
-    await whatsappService.start()
+    await whatsappSessionManager.initAll()
     schedulerService.start()
   })
 

@@ -4,31 +4,36 @@ import { autoMessageService } from '@/services/auto_message.service'
 import { groupService } from '@/services/group.service'
 import { notificationScheduleService } from '@/services/notification_schedule.service'
 import { panelAdminService } from '@/services/panel_admin.service'
-import { sessionOwnerService } from '@/services/session_owner.service'
+import { whatsappSessionManager } from '@/services/whatsapp_session_manager.service'
 
-async function normalizeMessageGroups(ownerPhoneNumber: string, messageId: string, groupIds: string[]) {
-  const normalizedGroupIds = await groupService.resolveGroupJids(ownerPhoneNumber, groupIds, { activeOnly: true })
+function getFirstSessionId(clientId: string): string | undefined {
+  const sessions = whatsappSessionManager.getSessionsByClientId(clientId)
+  const connected = sessions.find((s) => s.isConnected())
+  return (connected ?? sessions[0])?.sessionId
+}
+
+async function normalizeMessageGroups(clientId: string, sessionId: string, messageId: string, groupIds: string[]) {
+  const normalizedGroupIds = await groupService.resolveGroupJids(sessionId, groupIds, { activeOnly: true })
   const uniqueGroupIds = Array.from(new Set(normalizedGroupIds))
 
   if (uniqueGroupIds.length === groupIds.length && uniqueGroupIds.every((value, index) => value === groupIds[index])) {
     return uniqueGroupIds
   }
 
-  await autoMessageService.update(ownerPhoneNumber, messageId, { groupIds: uniqueGroupIds })
+  await autoMessageService.update(clientId, messageId, { groupIds: uniqueGroupIds })
   return uniqueGroupIds
 }
 
 export async function listMessages(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
-    if (!ownerPhoneNumber) {
-      res.json([])
-      return
-    }
+    const clientId = req.authUser!.clientId
+    const sessionId = getFirstSessionId(clientId)
 
-    const messages = await autoMessageService.list(ownerPhoneNumber)
-    for (const message of messages) {
-      message.groupIds = await normalizeMessageGroups(ownerPhoneNumber, message.id, message.groupIds || [])
+    const messages = await autoMessageService.list(clientId)
+    if (sessionId) {
+      for (const message of messages) {
+        message.groupIds = await normalizeMessageGroups(clientId, sessionId, message.id, message.groupIds || [])
+      }
     }
 
     res.json(messages.map((message) => panelAdminService.mapMessage(message)))
@@ -39,11 +44,16 @@ export async function listMessages(req: Request, res: Response, next: NextFuncti
 
 export async function createMessage(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
-    const groupIds = await groupService.resolveGroupJids(ownerPhoneNumber, Array.isArray(req.body?.groupIds) ? req.body.groupIds.map((value: unknown) => String(value)) : [], { activeOnly: true })
-    const message = await autoMessageService.create(ownerPhoneNumber, {
+    const clientId = req.authUser!.clientId
+    const sessionId = getFirstSessionId(clientId)
+    const rawGroupIds = Array.isArray(req.body?.groupIds) ? req.body.groupIds.map((value: unknown) => String(value)) : []
+    const groupIds = sessionId
+      ? Array.from(new Set(await groupService.resolveGroupJids(sessionId, rawGroupIds, { activeOnly: true })))
+      : rawGroupIds
+
+    const message = await autoMessageService.create(clientId, {
       ...req.body,
-      groupIds: Array.from(new Set(groupIds)),
+      groupIds,
     })
     res.status(201).json(panelAdminService.mapMessage(message))
   } catch (error) {
@@ -53,12 +63,19 @@ export async function createMessage(req: Request, res: Response, next: NextFunct
 
 export async function updateMessage(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
+    const clientId = req.authUser!.clientId
+    const sessionId = getFirstSessionId(clientId)
     const messageId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
-    const groupIds = req.body?.groupIds === undefined
-      ? undefined
-      : Array.from(new Set(await groupService.resolveGroupJids(ownerPhoneNumber, Array.isArray(req.body.groupIds) ? req.body.groupIds.map((value: unknown) => String(value)) : [], { activeOnly: true })))
-    const message = await autoMessageService.update(ownerPhoneNumber, messageId, {
+
+    let groupIds: string[] | undefined
+    if (req.body?.groupIds !== undefined) {
+      const rawGroupIds = Array.isArray(req.body.groupIds) ? req.body.groupIds.map((value: unknown) => String(value)) : []
+      groupIds = sessionId
+        ? Array.from(new Set(await groupService.resolveGroupJids(sessionId, rawGroupIds, { activeOnly: true })))
+        : rawGroupIds
+    }
+
+    const message = await autoMessageService.update(clientId, messageId, {
       ...req.body,
       groupIds,
     })
@@ -70,13 +87,13 @@ export async function updateMessage(req: Request, res: Response, next: NextFunct
 
 export async function deleteMessage(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
+    const clientId = req.authUser!.clientId
     const messageId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
-    const result = await autoMessageService.remove(ownerPhoneNumber, messageId)
+    const result = await autoMessageService.remove(clientId, messageId)
     await NotificationSchedule.createQueryBuilder()
       .update()
       .set({ messageTemplateId: () => 'NULL', messageText: () => 'NULL' })
-      .where('owner_phone_number = :ownerPhoneNumber', { ownerPhoneNumber })
+      .where('client_id = :clientId', { clientId })
       .andWhere('message_template_id = :messageId', { messageId })
       .execute()
     res.json(result)
@@ -87,13 +104,8 @@ export async function deleteMessage(req: Request, res: Response, next: NextFunct
 
 export async function listMessageHistory(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
-    if (!ownerPhoneNumber) {
-      res.json([])
-      return
-    }
-
-    const history = await notificationScheduleService.listDispatchHistory(ownerPhoneNumber)
+    const clientId = req.authUser!.clientId
+    const history = await notificationScheduleService.listDispatchHistory(clientId)
     const mapped = history.map((dispatch) => panelAdminService.mapSentMessage(dispatch, dispatch.schedule?.name))
     res.json(mapped)
   } catch (error) {

@@ -5,6 +5,9 @@ export type UserRole = 'admin' | 'agent'
 
 @Entity({ name: 'users' })
 export class User extends EntityBase {
+  @Column({ name: 'client_id' })
+  clientId: string
+
   @Column()
   name: string
 

@@ -1,16 +1,10 @@
 import { NextFunction, Request, Response } from 'express'
 import { panelConversationsService } from '@/services/panel_conversations.service'
-import { sessionOwnerService } from '@/services/session_owner.service'
 
 export async function listConversations(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
-    if (!ownerPhoneNumber) {
-      res.json([])
-      return
-    }
-
-    res.json(await panelConversationsService.list(req, ownerPhoneNumber))
+    const clientId = req.authUser!.clientId
+    res.json(await panelConversationsService.list(req, clientId))
   } catch (error) {
     next(error)
   }
@@ -18,9 +12,9 @@ export async function listConversations(req: Request, res: Response, next: NextF
 
 export async function getConversation(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
+    const clientId = req.authUser!.clientId
     const contactId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
-    res.json(await panelConversationsService.getByContactId(req, ownerPhoneNumber, contactId))
+    res.json(await panelConversationsService.getByContactId(req, clientId, contactId))
   } catch (error) {
     next(error)
   }

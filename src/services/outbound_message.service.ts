@@ -6,12 +6,10 @@ import { BotConfiguration } from '@/entities/bot_configuration.entity'
 import { reportService } from './report.service'
 import { sleep } from '@/utils/sleep'
 import logger from '@/utils/logger'
-import { whatsappService } from './whatsapp.service'
 import { antibanService } from './antiban.service'
-import { sessionOwnerService } from './session_owner.service'
 
 type BaseQueueInput = {
-  ownerPhoneNumber?: string
+  sessionId: string
   recipientJid: string
   sourceType: OutboundMessageSource
   sourceId?: string
@@ -48,19 +46,19 @@ function normalizeDelay(value?: number) {
   return Math.max(0, value ?? config.MESSAGE_THROTTLE_MS)
 }
 
-class OutboundMessageService {
-  // Two independent flush locks so scheduled sends and bot replies never block each other.
-  private scheduleFlushPromise?: Promise<void>
-  private replyFlushPromise?: Promise<void>
+async function getSessionInstance(sessionId: string) {
+  const { whatsappSessionManager } = await import('./whatsapp_session_manager.service')
+  return whatsappSessionManager.getSession(sessionId)
+}
 
-  private resolveOwnerPhoneNumber(ownerPhoneNumber?: string) {
-    return ownerPhoneNumber || sessionOwnerService.requireActiveOwnerPhoneNumber()
-  }
+class OutboundMessageService {
+  // Two independent flush locks per session so scheduled sends and bot replies never block each other.
+  private scheduleFlushPromises = new Map<string, Promise<void>>()
+  private replyFlushPromises = new Map<string, Promise<void>>()
 
   async queueText(input: QueueTextInput) {
-    const ownerPhoneNumber = this.resolveOwnerPhoneNumber(input.ownerPhoneNumber)
     const message = OutboundMessage.create({
-      ownerPhoneNumber,
+      sessionId: input.sessionId,
       recipientJid: input.recipientJid,
       messageType: 'TEXT',
       messageText: input.text,
@@ -73,14 +71,13 @@ class OutboundMessageService {
     })
 
     await message.save()
-    await this.flushForSource(input.sourceType)
+    await this.flushForSource(input.sessionId, input.sourceType)
     return message
   }
 
   async queueMedia(input: QueueMediaInput) {
-    const ownerPhoneNumber = this.resolveOwnerPhoneNumber(input.ownerPhoneNumber)
     const message = OutboundMessage.create({
-      ownerPhoneNumber,
+      sessionId: input.sessionId,
       recipientJid: input.recipientJid,
       messageType: 'IMAGE',
       mediaFilePath: input.filePath,
@@ -94,52 +91,55 @@ class OutboundMessageService {
     })
 
     await message.save()
-    await this.flushForSource(input.sourceType)
+    await this.flushForSource(input.sessionId, input.sourceType)
     return message
   }
 
   // Called on WhatsApp reconnect to drain any messages that accumulated while offline.
-  async flushPending() {
-    await Promise.all([this.flushScheduled(), this.flushReplies()])
+  async flushPending(sessionId: string) {
+    await Promise.all([this.flushScheduled(sessionId), this.flushReplies(sessionId)])
   }
 
-  private flushForSource(sourceType: OutboundMessageSource) {
-    return REPLY_SOURCES.includes(sourceType) ? this.flushReplies() : this.flushScheduled()
+  private flushForSource(sessionId: string, sourceType: OutboundMessageSource) {
+    return REPLY_SOURCES.includes(sourceType) ? this.flushReplies(sessionId) : this.flushScheduled(sessionId)
   }
 
-  private flushScheduled() {
-    if (this.scheduleFlushPromise) {
-      return this.scheduleFlushPromise
+  private flushScheduled(sessionId: string) {
+    if (this.scheduleFlushPromises.has(sessionId)) {
+      return this.scheduleFlushPromises.get(sessionId)!
     }
-    this.scheduleFlushPromise = this.runFlush(SCHEDULE_SOURCES).finally(() => {
-      this.scheduleFlushPromise = undefined
+    const promise = this.runFlush(sessionId, SCHEDULE_SOURCES).finally(() => {
+      this.scheduleFlushPromises.delete(sessionId)
     })
-    return this.scheduleFlushPromise
+    this.scheduleFlushPromises.set(sessionId, promise)
+    return promise
   }
 
-  private flushReplies() {
-    if (this.replyFlushPromise) {
-      return this.replyFlushPromise
+  private flushReplies(sessionId: string) {
+    if (this.replyFlushPromises.has(sessionId)) {
+      return this.replyFlushPromises.get(sessionId)!
     }
-    this.replyFlushPromise = this.runFlush(REPLY_SOURCES).finally(() => {
-      this.replyFlushPromise = undefined
+    const promise = this.runFlush(sessionId, REPLY_SOURCES).finally(() => {
+      this.replyFlushPromises.delete(sessionId)
     })
-    return this.replyFlushPromise
+    this.replyFlushPromises.set(sessionId, promise)
+    return promise
   }
 
-  private async runFlush(sourceTypes: OutboundMessageSource[]) {
-    const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
-    if (!whatsappService.isConnected() || !ownerPhoneNumber) {
+  private async runFlush(sessionId: string, sourceTypes: OutboundMessageSource[]) {
+    const session = await getSessionInstance(sessionId)
+    if (!session?.isConnected()) {
       return
     }
 
     const pending = await OutboundMessage.find({
-      where: { status: 'PENDING', ownerPhoneNumber, sourceType: In(sourceTypes) },
+      where: { status: 'PENDING', sessionId, sourceType: In(sourceTypes) },
       order: { createdAt: 'ASC' },
     })
 
     for (const message of pending) {
-      if (!whatsappService.isConnected()) {
+      const currentSession = await getSessionInstance(sessionId)
+      if (!currentSession?.isConnected()) {
         return
       }
 
@@ -149,9 +149,11 @@ class OutboundMessageService {
 
   private async deliver(message: OutboundMessage) {
     const isScheduled = message.sourceType === 'SCHEDULE'
+    const session = await getSessionInstance(message.sessionId)
 
     while (message.attempts < message.maxAttempts) {
-      if (!whatsappService.isConnected()) {
+      const currentSession = await getSessionInstance(message.sessionId)
+      if (!currentSession?.isConnected()) {
         message.errorMessage = 'WhatsApp session is not connected'
         await message.save()
         return
@@ -160,14 +162,18 @@ class OutboundMessageService {
       const content = message.messageText || message.caption || 'media'
 
       // Antiban rate limiting applies only to scheduled notifications.
-      // Bot replies (FLOW_REPLY, REPORT_FORWARD, REPORT_STATUS_UPDATE) bypass it.
       if (isScheduled) {
-        const botConfig = await BotConfiguration.findOne({ where: { ownerPhoneNumber: message.ownerPhoneNumber } })
+        // Find client via session to get bot config
+        const { AppDataSource } = await import('@/database/datasource')
+        const sessionRow = await AppDataSource.query<Array<{ client_id: string }>>(
+          `SELECT "client_id" FROM "whatsapp_sessions" WHERE "id" = $1`,
+          [message.sessionId],
+        )
+        const clientId = sessionRow[0]?.client_id
+        const botConfig = clientId ? await BotConfiguration.findOne({ where: { clientId } }) : null
         const skipIdenticalCheck = botConfig?.skipIdenticalMessageCheck ?? false
         const decision = await antibanService.beforeSend(message.recipientJid, content, { skipIdenticalCheck })
         if (!decision.allowed) {
-          // Scheduled messages are time-sensitive — mark as FAILED instead of
-          // leaving as PENDING, since delivering them the next day is incorrect.
           message.status = 'FAILED'
           message.errorMessage = decision.reason ?? 'antiban: límite diario alcanzado'
           await message.save()
@@ -176,17 +182,14 @@ class OutboundMessageService {
           return
         }
 
-        // Human-like delay recommended by antiban
         if (decision.delayMs > 0) {
           await sleep(decision.delayMs)
         }
       }
 
-      // Human-like delay for bot flow replies: show typing indicator + 2–5s wait.
-      // This avoids the "instant bot" pattern that WhatsApp detects.
       if (message.sourceType === 'FLOW_REPLY') {
-        const humanDelay = 2000 + Math.floor(Math.random() * 3000) // 2–5s
-        await whatsappService.sendTyping(message.recipientJid)
+        const humanDelay = 2000 + Math.floor(Math.random() * 3000)
+        await session?.sendTyping(message.recipientJid)
         await sleep(humanDelay)
       }
 
@@ -196,11 +199,12 @@ class OutboundMessageService {
       await message.save()
 
       try {
+        const activeSession = await getSessionInstance(message.sessionId)
         let waMessageId: string | undefined
         if (message.messageType === 'IMAGE') {
-          waMessageId = await whatsappService.sendMediaNow(message.recipientJid, message.mediaFilePath || '', message.caption)
+          waMessageId = await activeSession?.sendMediaNow(message.recipientJid, message.mediaFilePath || '', message.caption)
         } else {
-          waMessageId = await whatsappService.sendTextNow(message.recipientJid, message.messageText || '')
+          waMessageId = await activeSession?.sendTextNow(message.recipientJid, message.messageText || '')
         }
 
         if (isScheduled) antibanService.afterSend(message.recipientJid, content)
@@ -239,11 +243,19 @@ class OutboundMessageService {
 
   private async afterDelivery(message: OutboundMessage) {
     if (message.sourceType === 'REPORT_FORWARD' && message.sourceId) {
-      const report = await reportService.findById(message.ownerPhoneNumber, message.sourceId)
-      const groupJid = typeof message.metadata?.groupJid === 'string' ? message.metadata.groupJid : undefined
+      const { AppDataSource } = await import('@/database/datasource')
+      const sessionRow = await AppDataSource.query<Array<{ client_id: string }>>(
+        `SELECT "client_id" FROM "whatsapp_sessions" WHERE "id" = $1`,
+        [message.sessionId],
+      )
+      const clientId = sessionRow[0]?.client_id
+      if (clientId) {
+        const report = await reportService.findById(clientId, message.sourceId)
+        const groupJid = typeof message.metadata?.groupJid === 'string' ? message.metadata.groupJid : undefined
 
-      if (report && groupJid) {
-        await reportService.markForwarded(report, groupJid)
+        if (report && groupJid) {
+          await reportService.markForwarded(report, groupJid)
+        }
       }
     }
 
@@ -254,11 +266,19 @@ class OutboundMessageService {
 
   private async afterFailure(message: OutboundMessage) {
     if (message.sourceType === 'REPORT_FORWARD' && message.sourceId) {
-      const report = await reportService.findById(message.ownerPhoneNumber, message.sourceId)
-      const groupJid = typeof message.metadata?.groupJid === 'string' ? message.metadata.groupJid : undefined
+      const { AppDataSource } = await import('@/database/datasource')
+      const sessionRow = await AppDataSource.query<Array<{ client_id: string }>>(
+        `SELECT "client_id" FROM "whatsapp_sessions" WHERE "id" = $1`,
+        [message.sessionId],
+      )
+      const clientId = sessionRow[0]?.client_id
+      if (clientId) {
+        const report = await reportService.findById(clientId, message.sourceId)
+        const groupJid = typeof message.metadata?.groupJid === 'string' ? message.metadata.groupJid : undefined
 
-      if (report) {
-        await reportService.markFailed(report, groupJid)
+        if (report) {
+          await reportService.markFailed(report, groupJid)
+        }
       }
     }
 

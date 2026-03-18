@@ -10,41 +10,39 @@ import { Boom } from '@hapi/boom'
 import qrcode from 'qrcode-terminal'
 import { config } from '@/config'
 import logger from '@/utils/logger'
-import { inboundMessageService } from './inbound_message.service'
-import { groupService } from './group.service'
-import { whatsappIdentityService } from './whatsapp_identity.service'
-import { antibanService } from './antiban.service'
 import { getPhoneNumberFromJid } from '@/utils/phone'
 
-function createSilentBaileysLogger() {
-  const silentLogger = {
-    level: 'silent',
-    child() {
-      return silentLogger
-    },
-    trace() {},
-    debug() {},
-    info() {},
-    warn() {},
-    error() {},
-  }
-
-  return silentLogger
-}
-
-const baileysLogger = createSilentBaileysLogger()
-const GROUP_SYNC_INITIAL_DELAY_MS = 5000
-const GROUP_SYNC_INTERVAL_MS = 5 * 60 * 1000
-const GROUP_SYNC_RATE_LIMIT_DELAY_MS = 60000
-
-type SessionState = {
+export type SessionState = {
   status: 'idle' | 'connecting' | 'qr' | 'connected' | 'disconnected'
   qr?: string
   connectedAt?: Date
   phoneNumber?: string
 }
 
-class WhatsappService {
+const GROUP_SYNC_INITIAL_DELAY_MS = 5000
+const GROUP_SYNC_INTERVAL_MS = 5 * 60 * 1000
+const GROUP_SYNC_RATE_LIMIT_DELAY_MS = 60000
+
+function createSilentBaileysLogger() {
+  const silentLogger = {
+    level: 'silent',
+    child() { return silentLogger },
+    trace() {},
+    debug() {},
+    info() {},
+    warn() {},
+    error() {},
+  }
+  return silentLogger
+}
+
+const baileysLogger = createSilentBaileysLogger()
+
+export class WhatsappSessionInstance {
+  readonly sessionId: string
+  readonly clientId: string
+  readonly authDirKey: string
+
   private socket?: ReturnType<typeof makeWASocket>
   private state: SessionState = { status: 'idle' }
   private starting = false
@@ -52,7 +50,13 @@ class WhatsappService {
   private groupSyncTimer?: NodeJS.Timeout
   private syncingGroups = false
 
-  async start() {
+  constructor(params: { sessionId: string; clientId: string; authDirKey: string }) {
+    this.sessionId = params.sessionId
+    this.clientId = params.clientId
+    this.authDirKey = params.authDirKey
+  }
+
+  async start(): Promise<SessionState> {
     if (this.starting || this.socket) {
       return this.state
     }
@@ -84,18 +88,26 @@ class WhatsappService {
         if (qr) {
           this.state = { status: 'qr', qr }
           qrcode.generate(qr, { small: true })
-          logger.info('WhatsApp QR updated. Consulta GET /api/whatsapp/session para recuperar el valor y renderizarlo en el panel.')
+          logger.info(`[Session ${this.sessionId}] QR updated.`)
+          await this.persistStatus('qr', null)
         }
 
         if (connection === 'open') {
           const phoneNumber = getPhoneNumberFromJid(this.socket?.user?.id)
           this.state = { status: 'connected', connectedAt: new Date(), phoneNumber }
-          logger.info('WhatsApp connection established')
+          logger.info(`[Session ${this.sessionId}] Connected as ${phoneNumber}`)
+          await this.persistStatus('connected', phoneNumber ?? null)
+
+          const { antibanService } = await import('./antiban.service')
           antibanService.onReconnect()
-          await whatsappIdentityService.repairStoredContacts(phoneNumber)
+
+          const { whatsappIdentityService } = await import('./whatsapp_identity.service')
+          await whatsappIdentityService.repairStoredContacts(this.sessionId, phoneNumber)
+
           await this.scheduleInitialGroupSync()
+
           const { outboundMessageService } = await import('./outbound_message.service')
-          await outboundMessageService.flushPending()
+          await outboundMessageService.flushPending(this.sessionId)
         }
 
         if (connection === 'close') {
@@ -105,8 +117,12 @@ class WhatsappService {
           const disconnectedByLogout = statusCode === DisconnectReason.loggedOut
           const shouldReconnect = this.allowReconnect && !disconnectedByLogout
           this.state = { status: 'disconnected' }
+          await this.persistStatus('disconnected', null)
+
+          const { antibanService } = await import('./antiban.service')
           antibanService.onDisconnect(statusCode)
-          logger.warn(`WhatsApp connection closed. reconnect=${shouldReconnect}`)
+
+          logger.warn(`[Session ${this.sessionId}] Closed. reconnect=${shouldReconnect}`)
 
           if (shouldReconnect) {
             await this.start()
@@ -119,9 +135,7 @@ class WhatsappService {
           return
         }
 
-        // Flood guard: when multiple messages from the same contact arrive in one
-        // batch (e.g. after a reconnect), only process the last one per JID.
-        // Earlier messages are irrelevant — the contact already sent a newer one.
+        // Flood guard: only process latest message per JID in a batch
         const latestByJid = new Map<string, WAMessage>()
         for (const message of event.messages) {
           const jid = message.key.remoteJid
@@ -145,7 +159,7 @@ class WhatsappService {
     }
   }
 
-  async stop() {
+  async stop(): Promise<SessionState> {
     this.allowReconnect = false
     this.clearGroupSyncTimer()
 
@@ -155,38 +169,39 @@ class WhatsappService {
     }
 
     this.state = { status: 'disconnected' }
+    await this.persistStatus('disconnected', null)
     return this.state
   }
 
-  async reset() {
+  async reset(): Promise<SessionState> {
     await this.stop()
 
     const authDir = this.getAuthDir()
     fs.rmSync(authDir, { recursive: true, force: true })
     fs.mkdirSync(authDir, { recursive: true })
 
-    logger.info('WhatsApp auth state cleared. Starting a new session.')
+    logger.info(`[Session ${this.sessionId}] Auth state cleared. Restarting.`)
 
     return this.start()
   }
 
-  getSessionState() {
+  getSessionState(): SessionState {
     return this.state
   }
 
-  isConnected() {
+  isConnected(): boolean {
     return Boolean(this.socket) && this.state.status === 'connected'
   }
 
-  getConnectedPhoneNumber() {
+  getConnectedPhoneNumber(): string {
     return this.isConnected() ? this.state.phoneNumber || '' : ''
   }
 
-  async sendText(jid: string, text: string) {
+  async sendText(jid: string, text: string): Promise<void> {
     await this.sendTextNow(jid, text)
   }
 
-  async sendMedia(jid: string, filePath: string, caption?: string) {
+  async sendMedia(jid: string, filePath: string, caption?: string): Promise<void> {
     await this.sendMediaNow(jid, filePath, caption)
   }
 
@@ -194,7 +209,7 @@ class WhatsappService {
     try {
       await this.socket?.sendPresenceUpdate('composing', jid)
     } catch {
-      // Best-effort — never block on presence updates
+      // Best-effort
     }
   }
 
@@ -202,7 +217,6 @@ class WhatsappService {
     if (!this.socket) {
       throw new Error('WhatsApp session is not connected')
     }
-
     const result = await this.socket.sendMessage(jid, { text })
     return result?.key?.id ?? undefined
   }
@@ -211,7 +225,6 @@ class WhatsappService {
     if (!this.socket) {
       throw new Error('WhatsApp session is not connected')
     }
-
     const result = await this.socket.sendMessage(jid, {
       image: { url: filePath },
       caption,
@@ -223,15 +236,13 @@ class WhatsappService {
     if (!this.socket) {
       throw new Error('WhatsApp session is not connected')
     }
-
     await this.socket.sendMessage(jid, {
       delete: { remoteJid: jid, id: messageId, fromMe: true },
     })
   }
 
-  async syncGroups() {
-    const ownerPhoneNumber = this.getConnectedPhoneNumber()
-    if (!this.socket || !ownerPhoneNumber) {
+  async syncGroups(): Promise<unknown[]> {
+    if (!this.socket || !this.isConnected()) {
       return []
     }
 
@@ -248,19 +259,21 @@ class WhatsappService {
         name: group.subject,
         participantCount: group.participants.length,
       }))
-      const syncedGroups = await groupService.upsertGroups(ownerPhoneNumber, mapped)
+
+      const { groupService } = await import('./group.service')
+      const syncedGroups = await groupService.upsertGroups(this.sessionId, mapped)
       this.scheduleGroupSync(GROUP_SYNC_INTERVAL_MS)
       return syncedGroups
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
 
       if (message.toLowerCase().includes('rate-overlimit')) {
-        logger.warn(`WhatsApp group sync rate limited. Retrying in ${GROUP_SYNC_RATE_LIMIT_DELAY_MS / 1000}s.`)
+        logger.warn(`[Session ${this.sessionId}] Group sync rate limited. Retrying in ${GROUP_SYNC_RATE_LIMIT_DELAY_MS / 1000}s.`)
         this.scheduleGroupSync(GROUP_SYNC_RATE_LIMIT_DELAY_MS)
         return []
       }
 
-      logger.error(`WhatsApp group sync failed: ${message}`)
+      logger.error(`[Session ${this.sessionId}] Group sync failed: ${message}`)
       this.scheduleGroupSync(GROUP_SYNC_INTERVAL_MS)
       return []
     } finally {
@@ -268,13 +281,10 @@ class WhatsappService {
     }
   }
 
-  private async scheduleInitialGroupSync() {
-    const ownerPhoneNumber = this.getConnectedPhoneNumber()
-    if (!ownerPhoneNumber) {
-      return
-    }
+  private async scheduleInitialGroupSync(): Promise<void> {
+    const { groupService } = await import('./group.service')
+    const latestSyncAt = await groupService.getLatestSyncAt(this.sessionId)
 
-    const latestSyncAt = await groupService.getLatestSyncAt(ownerPhoneNumber)
     if (!latestSyncAt) {
       this.scheduleGroupSync()
       return
@@ -287,30 +297,29 @@ class WhatsappService {
     }
 
     const delayMs = Math.max(GROUP_SYNC_INITIAL_DELAY_MS, GROUP_SYNC_INTERVAL_MS - elapsedMs)
-    logger.info(`Skipping immediate WhatsApp group sync. Next sync in ${Math.ceil(delayMs / 1000)}s because groups were synced recently.`)
+    logger.info(`[Session ${this.sessionId}] Skipping immediate group sync. Next in ${Math.ceil(delayMs / 1000)}s.`)
     this.scheduleGroupSync(delayMs)
   }
 
-  private scheduleGroupSync(delayMs = GROUP_SYNC_INITIAL_DELAY_MS) {
+  private scheduleGroupSync(delayMs = GROUP_SYNC_INITIAL_DELAY_MS): void {
     this.clearGroupSyncTimer()
-
     this.groupSyncTimer = setTimeout(() => {
       void this.syncGroups()
     }, delayMs)
   }
 
-  private clearGroupSyncTimer() {
+  private clearGroupSyncTimer(): void {
     if (this.groupSyncTimer) {
       clearTimeout(this.groupSyncTimer)
       this.groupSyncTimer = undefined
     }
   }
 
-  private getAuthDir() {
-    return path.resolve(process.cwd(), config.SESSION_AUTH_DIR)
+  getAuthDir(): string {
+    return path.resolve(process.cwd(), config.SESSION_AUTH_DIR, this.authDirKey)
   }
 
-  private async handleMessage(message: WAMessage) {
+  private async handleMessage(message: WAMessage): Promise<void> {
     const remoteJid = message.key.remoteJid
     if (!remoteJid || message.key.fromMe || remoteJid.endsWith('@g.us')) {
       return
@@ -321,7 +330,11 @@ class WhatsappService {
       return
     }
 
+    const { inboundMessageService } = await import('./inbound_message.service')
     await inboundMessageService.processIncomingText({
+      sessionId: this.sessionId,
+      clientId: this.clientId,
+      authDirKey: this.authDirKey,
       fromJid: remoteJid,
       text,
       externalMessageId: message.key.id || undefined,
@@ -330,7 +343,7 @@ class WhatsappService {
     })
   }
 
-  private extractText(message: WAMessage) {
+  private extractText(message: WAMessage): string {
     const content = message.message
     if (!content) {
       return ''
@@ -348,6 +361,16 @@ class WhatsappService {
 
     return ''
   }
-}
 
-export const whatsappService = new WhatsappService()
+  private async persistStatus(status: string, phoneNumber: string | null): Promise<void> {
+    try {
+      const { AppDataSource } = await import('@/database/datasource')
+      await AppDataSource.query(
+        `UPDATE "whatsapp_sessions" SET "status" = $1, "phone_number" = $2, "connected_at" = $3, "updated_at" = now() WHERE "id" = $4`,
+        [status, phoneNumber, status === 'connected' ? new Date() : null, this.sessionId],
+      )
+    } catch (err) {
+      logger.warn(`[Session ${this.sessionId}] Failed to persist status: ${err instanceof Error ? err.message : err}`)
+    }
+  }
+}

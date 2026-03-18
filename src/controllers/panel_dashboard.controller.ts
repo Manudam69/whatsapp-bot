@@ -1,4 +1,5 @@
 import { NextFunction, Request, Response } from 'express'
+import { In } from 'typeorm'
 import { AutoMessage } from '@/entities/auto_message.entity'
 import { IncidentReport } from '@/entities/incident_report.entity'
 import { NotificationDispatch } from '@/entities/notification_dispatch.entity'
@@ -7,44 +8,28 @@ import { OutboundMessage } from '@/entities/outbound_message.entity'
 import { WhatsappGroup } from '@/entities/whatsapp_group.entity'
 import { panelAdminService } from '@/services/panel_admin.service'
 import { panelConversationsService } from '@/services/panel_conversations.service'
-import { sessionOwnerService } from '@/services/session_owner.service'
-import { whatsappService } from '@/services/whatsapp.service'
+import { whatsappSessionManager } from '@/services/whatsapp_session_manager.service'
 
 export async function getDashboardOverview(req: Request, res: Response, next: NextFunction) {
   try {
-    const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
-    if (!ownerPhoneNumber) {
-      res.json({
-        stats: {
-          activeGroups: 0,
-          totalGroups: 0,
-          activeSchedules: 0,
-          totalSchedules: 0,
-          pendingReports: 0,
-          messagesToday: 0,
-          sessionStatus: panelAdminService.mapSession(whatsappService.getSessionState()).status,
-        },
-        delivery: {
-          queueDepth: 0,
-          retrying: 0,
-          failedLast24h: 0,
-          throughputPerHour: 0,
-          successRate: 100,
-        },
-        timeline: [],
-        conversations: [],
-      })
-      return
-    }
+    const clientId = req.authUser!.clientId
+    const clientSessions = whatsappSessionManager.getSessionsByClientId(clientId)
+    const sessionIds = clientSessions.map((s) => s.sessionId)
+    const connectedSession = clientSessions.find((s) => s.isConnected())
+    const sessionState = connectedSession?.getSessionState() ?? clientSessions[0]?.getSessionState() ?? { status: 'idle' as const }
 
     const [groups, schedules, reports, dispatches, messages, pendingOutbound, conversations] = await Promise.all([
-      WhatsappGroup.find({ where: { ownerPhoneNumber, isMember: true } }),
-      NotificationSchedule.find({ where: { ownerPhoneNumber } }),
-      IncidentReport.find({ where: { ownerPhoneNumber }, order: { receivedAt: 'DESC' }, take: 50 }),
-      NotificationDispatch.find({ where: { ownerPhoneNumber }, order: { executedAt: 'DESC' }, take: 100 }),
-      AutoMessage.find({ where: { ownerPhoneNumber } }),
-      OutboundMessage.count({ where: { ownerPhoneNumber, status: 'PENDING' } }),
-      panelConversationsService.list(req, ownerPhoneNumber, 5),
+      sessionIds.length > 0
+        ? WhatsappGroup.find({ where: { sessionId: In(sessionIds), isMember: true } })
+        : Promise.resolve([]),
+      NotificationSchedule.find({ where: { clientId } }),
+      IncidentReport.find({ where: { clientId }, order: { receivedAt: 'DESC' }, take: 50 }),
+      NotificationDispatch.find({ where: { clientId }, order: { executedAt: 'DESC' }, take: 100 }),
+      AutoMessage.find({ where: { clientId } }),
+      sessionIds.length > 0
+        ? OutboundMessage.count({ where: { sessionId: In(sessionIds), status: 'PENDING' } })
+        : Promise.resolve(0),
+      panelConversationsService.list(req, clientId, 5),
     ])
 
     const now = Date.now()
@@ -111,7 +96,7 @@ export async function getDashboardOverview(req: Request, res: Response, next: Ne
         totalSchedules: schedules.length,
         pendingReports: reports.filter((report) => report.reviewStatus === 'pending').length,
         messagesToday: sentTodayCount,
-        sessionStatus: panelAdminService.mapSession(whatsappService.getSessionState()).status,
+        sessionStatus: panelAdminService.mapSession(sessionState).status,
       },
       delivery: {
         queueDepth: retryingCount,

@@ -4,7 +4,8 @@ import { userService } from '@/services/user.service'
 
 export async function listUsers(req: Request, res: Response, next: NextFunction) {
   try {
-    const users = await userService.list()
+    const clientId = req.authUser!.clientId
+    const users = await userService.list(clientId)
     res.json(users.map((user) => authService.sanitizeUser(user)))
   } catch (error) {
     next(error)
@@ -13,7 +14,8 @@ export async function listUsers(req: Request, res: Response, next: NextFunction)
 
 export async function createUser(req: Request, res: Response, next: NextFunction) {
   try {
-    const user = await userService.create(req.body ?? {})
+    const clientId = req.authUser!.clientId
+    const user = await userService.create(clientId, req.body ?? {})
     res.status(201).json(authService.sanitizeUser(user))
   } catch (error) {
     next(error)

@@ -13,12 +13,16 @@ export type ContactFlowState =
   | 'AWAITING_CONFIRMATION'
 
 @Entity({ name: 'client_contacts' })
-@Index('IDX_client_contacts_owner_phone_number', ['ownerPhoneNumber'])
-@Index('UQ_client_contacts_owner_phone', ['ownerPhoneNumber', 'phoneNumber'], { unique: true })
-@Index('UQ_client_contacts_owner_jid', ['ownerPhoneNumber', 'whatsappJid'], { unique: true })
+@Index('IDX_client_contacts_client_id', ['clientId'])
+@Index('IDX_client_contacts_session_id', ['sessionId'])
+@Index('UQ_client_contacts_session_phone', ['sessionId', 'phoneNumber'], { unique: true })
+@Index('UQ_client_contacts_session_jid', ['sessionId', 'whatsappJid'], { unique: true })
 export class ClientContact extends EntityBase {
-  @Column({ name: 'owner_phone_number' })
-  ownerPhoneNumber: string
+  @Column({ name: 'client_id' })
+  clientId: string
+
+  @Column({ name: 'session_id' })
+  sessionId: string
 
   @Column({ name: 'phone_number' })
   phoneNumber: string
@@ -26,7 +30,7 @@ export class ClientContact extends EntityBase {
   @Column({ name: 'whatsapp_jid' })
   whatsappJid: string
 
-  @Column({ name: 'contact_name', nullable: true })
+  @Column({ name: 'contact_name', type: 'varchar', nullable: true })
   contactName?: string
 
   @Column({ name: 'current_flow', default: 'IDLE' })
@@ -38,13 +42,13 @@ export class ClientContact extends EntityBase {
   @Column({ name: 'last_report_at', type: 'timestamptz', nullable: true })
   lastReportAt?: Date
 
-  @Column({ name: 'draft_service_name', nullable: true })
+  @Column({ name: 'draft_service_name', type: 'varchar', nullable: true })
   draftServiceName?: string
 
-  @Column({ name: 'draft_incident_date', nullable: true })
+  @Column({ name: 'draft_incident_date', type: 'varchar', nullable: true })
   draftIncidentDate?: string
 
-  @Column({ name: 'draft_incident_time', nullable: true })
+  @Column({ name: 'draft_incident_time', type: 'varchar', nullable: true })
   draftIncidentTime?: string
 
   @Column({ name: 'draft_incident_text', type: 'text', nullable: true })

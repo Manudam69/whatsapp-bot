@@ -7,8 +7,8 @@ export type OutboundMessageSource = 'FLOW_REPLY' | 'REPORT_FORWARD' | 'REPORT_ST
 
 @Entity({ name: 'outbound_messages' })
 export class OutboundMessage extends EntityBase {
-  @Column({ name: 'owner_phone_number' })
-  ownerPhoneNumber: string
+  @Column({ name: 'session_id' })
+  sessionId: string
 
   @Column({ name: 'recipient_jid' })
   recipientJid: string
@@ -19,7 +19,7 @@ export class OutboundMessage extends EntityBase {
   @Column({ name: 'message_text', type: 'text', nullable: true })
   messageText?: string
 
-  @Column({ name: 'media_file_path', nullable: true })
+  @Column({ name: 'media_file_path', type: 'varchar', nullable: true })
   mediaFilePath?: string
 
   @Column({ name: 'caption', type: 'text', nullable: true })
@@ -49,7 +49,7 @@ export class OutboundMessage extends EntityBase {
   @Column({ name: 'source_type', default: 'FLOW_REPLY' })
   sourceType: OutboundMessageSource
 
-  @Column({ name: 'source_id', nullable: true })
+  @Column({ name: 'source_id', type: 'varchar', nullable: true })
   sourceId?: string
 
   @Column({ type: 'jsonb', nullable: true })

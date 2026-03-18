@@ -18,8 +18,8 @@ function validateRole(role: string): role is UserRole {
 }
 
 export const userService = {
-  async list() {
-    return User.find({ order: { createdAt: 'DESC' } })
+  async list(clientId: string) {
+    return User.find({ where: { clientId }, order: { createdAt: 'DESC' } })
   },
 
   async findById(id: string) {
@@ -35,7 +35,7 @@ export const userService = {
     return User.findOne({ where: { email: normalizeEmail(email) } })
   },
 
-  async create(payload: UserPayload) {
+  async create(clientId: string, payload: UserPayload) {
     const name = payload.name?.trim()
     const email = payload.email ? normalizeEmail(payload.email) : ''
     const password = payload.password?.trim() || ''
@@ -60,6 +60,7 @@ export const userService = {
     }
 
     return User.save({
+      clientId,
       name,
       email,
       role,

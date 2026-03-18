@@ -9,14 +9,14 @@ import { outboundMessageService } from './outbound_message.service'
 import { getTimeParts } from '@/utils/time'
 import { sleep } from '@/utils/sleep'
 import logger from '@/utils/logger'
-import { sessionOwnerService } from './session_owner.service'
+import { whatsappSessionManager } from './whatsapp_session_manager.service'
 
-async function resolveMessageForGroup(ownerPhoneNumber: string, schedule: NotificationSchedule, groupIndex: number) {
+async function resolveMessageForGroup(clientId: string, schedule: NotificationSchedule, groupIndex: number) {
   const templateIds = schedule.messageTemplateIds ?? []
 
   if (templateIds.length > 0) {
     const messageId = templateIds[groupIndex % templateIds.length]
-    const message = await autoMessageService.findById(ownerPhoneNumber, messageId).catch(() => null)
+    const message = await autoMessageService.findById(clientId, messageId).catch(() => null)
     if (message) {
       return {
         messageText: message.content || undefined,
@@ -34,9 +34,9 @@ async function resolveMessageForGroup(ownerPhoneNumber: string, schedule: Notifi
   }
 }
 
-async function dispatchSchedule(schedule: NotificationSchedule, executionKey: string) {
-  const ownerPhoneNumber = schedule.ownerPhoneNumber
-  const activeGroupJids = Array.from(new Set(await groupService.resolveGroupJids(ownerPhoneNumber, schedule.groupJids, { activeOnly: true })))
+async function dispatchSchedule(schedule: NotificationSchedule, sessionId: string, executionKey: string) {
+  const clientId = schedule.clientId
+  const activeGroupJids = Array.from(new Set(await groupService.resolveGroupJids(sessionId, schedule.groupJids, { activeOnly: true })))
 
   if (activeGroupJids.length !== schedule.groupJids.length) {
     schedule.groupJids = activeGroupJids
@@ -52,13 +52,13 @@ async function dispatchSchedule(schedule: NotificationSchedule, executionKey: st
 
   for (let i = 0; i < activeGroupJids.length; i++) {
     const groupJid = activeGroupJids[i]
-    const { messageText, mediaFilePath, mediaAssetPath } = await resolveMessageForGroup(ownerPhoneNumber, schedule, i)
+    const { messageText, mediaFilePath, mediaAssetPath } = await resolveMessageForGroup(clientId, schedule, i)
 
     const dispatch = await NotificationDispatch.save({
-      ownerPhoneNumber,
+      clientId,
       schedule,
       groupJid,
-      groupName: (await groupService.resolveGroupName(ownerPhoneNumber, groupJid)) || undefined,
+      groupName: (await groupService.resolveGroupName(sessionId, groupJid)) || undefined,
       status: 'PENDING',
       attempts: 0,
       executedAt: new Date(),
@@ -69,7 +69,7 @@ async function dispatchSchedule(schedule: NotificationSchedule, executionKey: st
 
     if (mediaFilePath) {
       await outboundMessageService.queueMedia({
-        ownerPhoneNumber,
+        sessionId,
         recipientJid: groupJid,
         filePath: mediaFilePath,
         caption: messageText,
@@ -81,7 +81,7 @@ async function dispatchSchedule(schedule: NotificationSchedule, executionKey: st
       })
     } else if (messageText) {
       await outboundMessageService.queueText({
-        ownerPhoneNumber,
+        sessionId,
         recipientJid: groupJid,
         text: messageText,
         sourceType: 'SCHEDULE',
@@ -106,25 +106,28 @@ export const schedulerService = {
     cron.schedule(
       '*/1 * * * *',
       async () => {
-        const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
-        if (!ownerPhoneNumber) {
-          return
-        }
-
         const now = getTimeParts(config.SCHEDULE_TIME_ZONE)
         const executionKey = `${now.dateKey}-${now.minuteKey}`
-        const schedules = await NotificationSchedule.find({ where: { isActive: true, ownerPhoneNumber } })
 
-        for (const schedule of schedules) {
-          const matchesDay = schedule.daysOfWeek.includes(now.weekday)
-          const matchesTime = schedule.times.includes(now.minuteKey)
-          const alreadyExecuted = schedule.lastExecutionKey === executionKey
+        // Get all connected sessions
+        const connectedSessions = whatsappSessionManager
+          .getAllSessionStates()
+          .filter(({ state }) => state.status === 'connected')
 
-          if (!matchesDay || !matchesTime || alreadyExecuted) {
-            continue
+        for (const { sessionId, clientId } of connectedSessions) {
+          const schedules = await NotificationSchedule.find({ where: { isActive: true, clientId } })
+
+          for (const schedule of schedules) {
+            const matchesDay = schedule.daysOfWeek.includes(now.weekday)
+            const matchesTime = schedule.times.includes(now.minuteKey)
+            const alreadyExecuted = schedule.lastExecutionKey === executionKey
+
+            if (!matchesDay || !matchesTime || alreadyExecuted) {
+              continue
+            }
+
+            await dispatchSchedule(schedule, sessionId, executionKey)
           }
-
-          await dispatchSchedule(schedule, executionKey)
         }
       },
       { timezone: config.SCHEDULE_TIME_ZONE }
