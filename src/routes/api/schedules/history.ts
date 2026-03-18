@@ -1,5 +1,7 @@
-import { getScheduleHistory } from '@/controllers/schedules.controller'
+import { authenticate, requireAdmin } from '@/middlewares/authenticate'
+import { getDispatchHistory, deleteDispatchBatch } from '@/controllers/panel_schedules.controller'
 
 export default {
-  GET: getScheduleHistory,
+  GET: [authenticate, getDispatchHistory],
+  DELETE: [authenticate, requireAdmin, deleteDispatchBatch],
 } satisfies RestController

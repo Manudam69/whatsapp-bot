@@ -149,7 +149,7 @@ export const panelAdminService = {
     }
   },
 
-  mapSentMessage(dispatch: NotificationDispatch, messageName?: string) {
+  mapSentMessage(dispatch: NotificationDispatch, messageName?: string, canRevokeFromWhatsapp = false) {
     return {
       id: dispatch.id,
       scheduleId: dispatch.schedule?.id,
@@ -162,6 +162,7 @@ export const panelAdminService = {
       status: dispatch.status === 'SENT' ? 'success' : dispatch.status === 'FAILED' ? 'failed' : 'retrying',
       error: dispatch.errorMessage,
       retryCount: dispatch.attempts,
+      canRevokeFromWhatsapp,
     }
   },
 

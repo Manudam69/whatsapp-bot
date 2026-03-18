@@ -196,10 +196,11 @@ class OutboundMessageService {
       await message.save()
 
       try {
+        let waMessageId: string | undefined
         if (message.messageType === 'IMAGE') {
-          await whatsappService.sendMediaNow(message.recipientJid, message.mediaFilePath || '', message.caption)
+          waMessageId = await whatsappService.sendMediaNow(message.recipientJid, message.mediaFilePath || '', message.caption)
         } else {
-          await whatsappService.sendTextNow(message.recipientJid, message.messageText || '')
+          waMessageId = await whatsappService.sendTextNow(message.recipientJid, message.messageText || '')
         }
 
         if (isScheduled) antibanService.afterSend(message.recipientJid, content)
@@ -207,6 +208,9 @@ class OutboundMessageService {
         message.status = 'SENT'
         message.sentAt = new Date()
         message.errorMessage = undefined
+        if (waMessageId) {
+          message.metadata = { ...message.metadata, whatsappMessageId: waMessageId }
+        }
         await message.save()
         await this.afterDelivery(message)
         return

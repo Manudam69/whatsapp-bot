@@ -198,22 +198,34 @@ class WhatsappService {
     }
   }
 
-  async sendTextNow(jid: string, text: string) {
+  async sendTextNow(jid: string, text: string): Promise<string | undefined> {
     if (!this.socket) {
       throw new Error('WhatsApp session is not connected')
     }
 
-    await this.socket.sendMessage(jid, { text })
+    const result = await this.socket.sendMessage(jid, { text })
+    return result?.key?.id ?? undefined
   }
 
-  async sendMediaNow(jid: string, filePath: string, caption?: string) {
+  async sendMediaNow(jid: string, filePath: string, caption?: string): Promise<string | undefined> {
+    if (!this.socket) {
+      throw new Error('WhatsApp session is not connected')
+    }
+
+    const result = await this.socket.sendMessage(jid, {
+      image: { url: filePath },
+      caption,
+    })
+    return result?.key?.id ?? undefined
+  }
+
+  async deleteMessageNow(jid: string, messageId: string): Promise<void> {
     if (!this.socket) {
       throw new Error('WhatsApp session is not connected')
     }
 
     await this.socket.sendMessage(jid, {
-      image: { url: filePath },
-      caption,
+      delete: { remoteJid: jid, id: messageId, fromMe: true },
     })
   }
 
