@@ -1,7 +1,7 @@
 import { Column, Entity } from 'typeorm'
 import { EntityBase } from './entity.base'
 
-export type UserRole = 'admin' | 'viewer'
+export type UserRole = 'admin' | 'agent'
 
 @Entity({ name: 'users' })
 export class User extends EntityBase {
@@ -14,6 +14,6 @@ export class User extends EntityBase {
   @Column({ name: 'password_hash' })
   passwordHash: string
 
-  @Column({ default: 'viewer' })
+  @Column({ default: 'agent' })
   role: UserRole
 }

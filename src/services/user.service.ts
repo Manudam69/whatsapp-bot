@@ -14,7 +14,7 @@ function normalizeEmail(email: string) {
 }
 
 function validateRole(role: string): role is UserRole {
-  return role === 'admin' || role === 'viewer'
+  return role === 'admin' || role === 'agent'
 }
 
 export const userService = {
@@ -39,7 +39,7 @@ export const userService = {
     const name = payload.name?.trim()
     const email = payload.email ? normalizeEmail(payload.email) : ''
     const password = payload.password?.trim() || ''
-    const role = payload.role || 'viewer'
+    const role = payload.role || 'agent'
 
     if (!name) {
       throw BadRequest('El nombre es obligatorio.')

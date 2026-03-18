@@ -37,6 +37,21 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction) {
   }
 }
 
+export function requireAdminOrAgent(req: Request, res: Response, next: NextFunction) {
+  try {
+    if (!req.authUser) {
+      throw Unauthorized('Debes iniciar sesión para continuar.')
+    }
+    if (req.authUser.role !== 'admin' && req.authUser.role !== 'agent') {
+      throw Forbidden('No tienes permisos para realizar esta acción.')
+    }
+
+    next()
+  } catch (error) {
+    next(error)
+  }
+}
+
 export function requireConnectedWhatsappSession(req: Request, res: Response, next: NextFunction) {
   try {
     if (whatsappService.getSessionState().status !== 'connected') {
