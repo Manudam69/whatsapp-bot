@@ -1,3 +1,4 @@
+import { In } from 'typeorm'
 import { config } from '@/config'
 import { NotificationDispatch } from '@/entities/notification_dispatch.entity'
 import { OutboundMessage, OutboundMessageSource } from '@/entities/outbound_message.entity'
@@ -28,6 +29,12 @@ type QueueMediaInput = BaseQueueInput & {
   caption?: string
 }
 
+// Sources that are time-sensitive user replies — processed in the reply queue,
+// independently of the scheduled-message queue, so bot conversations are never
+// blocked by antiban delays from a mass send.
+const REPLY_SOURCES: OutboundMessageSource[] = ['FLOW_REPLY', 'REPORT_FORWARD', 'REPORT_STATUS_UPDATE']
+const SCHEDULE_SOURCES: OutboundMessageSource[] = ['SCHEDULE']
+
 function isDisconnectedError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
   return message.toLowerCase().includes('not connected')
@@ -42,7 +49,9 @@ function normalizeDelay(value?: number) {
 }
 
 class OutboundMessageService {
-  private flushPromise?: Promise<void>
+  // Two independent flush locks so scheduled sends and bot replies never block each other.
+  private scheduleFlushPromise?: Promise<void>
+  private replyFlushPromise?: Promise<void>
 
   private resolveOwnerPhoneNumber(ownerPhoneNumber?: string) {
     return ownerPhoneNumber || sessionOwnerService.requireActiveOwnerPhoneNumber()
@@ -64,7 +73,7 @@ class OutboundMessageService {
     })
 
     await message.save()
-    await this.flushPending()
+    await this.flushForSource(input.sourceType)
     return message
   }
 
@@ -85,30 +94,47 @@ class OutboundMessageService {
     })
 
     await message.save()
-    await this.flushPending()
+    await this.flushForSource(input.sourceType)
     return message
   }
 
+  // Called on WhatsApp reconnect to drain any messages that accumulated while offline.
   async flushPending() {
-    if (this.flushPromise) {
-      return this.flushPromise
-    }
-
-    this.flushPromise = this.runFlush().finally(() => {
-      this.flushPromise = undefined
-    })
-
-    return this.flushPromise
+    await Promise.all([this.flushScheduled(), this.flushReplies()])
   }
 
-  private async runFlush() {
+  private flushForSource(sourceType: OutboundMessageSource) {
+    return REPLY_SOURCES.includes(sourceType) ? this.flushReplies() : this.flushScheduled()
+  }
+
+  private flushScheduled() {
+    if (this.scheduleFlushPromise) {
+      return this.scheduleFlushPromise
+    }
+    this.scheduleFlushPromise = this.runFlush(SCHEDULE_SOURCES).finally(() => {
+      this.scheduleFlushPromise = undefined
+    })
+    return this.scheduleFlushPromise
+  }
+
+  private flushReplies() {
+    if (this.replyFlushPromise) {
+      return this.replyFlushPromise
+    }
+    this.replyFlushPromise = this.runFlush(REPLY_SOURCES).finally(() => {
+      this.replyFlushPromise = undefined
+    })
+    return this.replyFlushPromise
+  }
+
+  private async runFlush(sourceTypes: OutboundMessageSource[]) {
     const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
     if (!whatsappService.isConnected() || !ownerPhoneNumber) {
       return
     }
 
     const pending = await OutboundMessage.find({
-      where: { status: 'PENDING', ownerPhoneNumber },
+      where: { status: 'PENDING', ownerPhoneNumber, sourceType: In(sourceTypes) },
       order: { createdAt: 'ASC' },
     })
 
