@@ -3,10 +3,10 @@
  * Protects the connected WhatsApp number from bans by enforcing human-like
  * messaging patterns: rate limiting, gaussian jitter, warm-up, and health monitoring.
  */
-import fs from 'fs'
-import path from 'path'
 import { config } from '@/config'
 import logger from '@/utils/logger'
+import { AppDataSource } from '@/database/datasource'
+import { AntiBanWarmUpState } from '@/entities/antiban_warmup_state.entity'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -483,69 +483,87 @@ export class AntiBan {
 }
 
 // ---------------------------------------------------------------------------
-// Singleton with warm-up state persistence
+// Singleton with warm-up state persistence (database-backed)
 // ---------------------------------------------------------------------------
 
-const STATE_FILE = path.resolve(process.cwd(), 'data/antiban-warmup.json')
-
-function loadWarmUpState(): WarmUpState | undefined {
+async function loadWarmUpState(): Promise<WarmUpState | undefined> {
   try {
-    if (fs.existsSync(STATE_FILE)) {
-      return JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8')) as WarmUpState
+    const repo = AppDataSource.getRepository(AntiBanWarmUpState)
+    const row = await repo.findOne({ where: {} })
+    if (!row) return undefined
+    return {
+      firstMessageAt: row.firstMessageAt,
+      lastMessageAt: row.lastMessageAt,
+      dailyCounts: row.dailyCounts ?? {},
     }
-  } catch {
-    // ignore
+  } catch (err) {
+    logger.warn(`[antiban] No se pudo cargar el estado de warm-up desde la base de datos: ${err}`)
+    return undefined
   }
-  return undefined
 }
 
-function saveWarmUpState(state: WarmUpState): void {
+async function saveWarmUpState(state: WarmUpState): Promise<void> {
   try {
-    fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true })
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2))
+    const repo = AppDataSource.getRepository(AntiBanWarmUpState)
+    let row = await repo.findOne({ where: {} })
+    if (!row) {
+      row = repo.create()
+    }
+    row.firstMessageAt = state.firstMessageAt
+    row.lastMessageAt = state.lastMessageAt
+    row.dailyCounts = state.dailyCounts
+    await repo.save(row)
   } catch (err) {
     logger.warn(`[antiban] No se pudo persistir el estado de warm-up: ${err}`)
   }
 }
 
-export const antibanService = new AntiBan(
-  {
-    skipWarmUp: config.ANTIBAN_SKIP_WARMUP,
-    rateLimiter: {
-      maxPerMinute: 8,
-      maxPerHour: 200,
-      maxPerDay: 1500,
-      minDelayMs: 2000,
-      maxDelayMs: 6000,
-      newChatDelayMs: 3000,
-      maxIdenticalMessages: 3,
-      burstAllowance: 2,
-    },
-    warmUp: {
-      warmUpDays: 7,
-      day1Limit: 20,
-      growthFactor: 1.8,
-      inactivityThresholdHours: 72,
-    },
-    health: {
-      disconnectWarningThreshold: 3,
-      disconnectCriticalThreshold: 5,
-      failedMessageThreshold: 5,
-      autoPauseAt: 'high',
-      onRiskChange: (status) => {
-        if (status.risk === 'critical' || status.risk === 'high') {
-          logger.warn(`[antiban] Riesgo: ${status.risk} (score=${status.score}) — ${status.recommendation}`)
-        } else {
-          logger.info(`[antiban] Riesgo cambiado a ${status.risk} (score=${status.score})`)
-        }
-        saveWarmUpState(antibanService.exportWarmUpState())
+export let antibanService: AntiBan
+
+export async function initAntibanService(): Promise<void> {
+  const savedState = await loadWarmUpState()
+
+  antibanService = new AntiBan(
+    {
+      skipWarmUp: config.ANTIBAN_SKIP_WARMUP,
+      rateLimiter: {
+        maxPerMinute: 8,
+        maxPerHour: 200,
+        maxPerDay: 1500,
+        minDelayMs: 2000,
+        maxDelayMs: 6000,
+        newChatDelayMs: 3000,
+        maxIdenticalMessages: 3,
+        burstAllowance: 2,
+      },
+      warmUp: {
+        warmUpDays: 7,
+        day1Limit: 20,
+        growthFactor: 1.8,
+        inactivityThresholdHours: 72,
+      },
+      health: {
+        disconnectWarningThreshold: 3,
+        disconnectCriticalThreshold: 5,
+        failedMessageThreshold: 5,
+        autoPauseAt: 'high',
+        onRiskChange: (status) => {
+          if (status.risk === 'critical' || status.risk === 'high') {
+            logger.warn(`[antiban] Riesgo: ${status.risk} (score=${status.score}) — ${status.recommendation}`)
+          } else {
+            logger.info(`[antiban] Riesgo cambiado a ${status.risk} (score=${status.score})`)
+          }
+          void saveWarmUpState(antibanService.exportWarmUpState())
+        },
       },
     },
-  },
-  loadWarmUpState(),
-)
+    savedState,
+  )
 
-// Persist warm-up state every 5 minutes
-setInterval(() => {
-  saveWarmUpState(antibanService.exportWarmUpState())
-}, 5 * 60 * 1000)
+  // Persist warm-up state every 5 minutes
+  setInterval(() => {
+    void saveWarmUpState(antibanService.exportWarmUpState())
+  }, 5 * 60 * 1000)
+
+  logger.info('[antiban] Servicio inicializado con estado desde la base de datos')
+}

@@ -14,6 +14,7 @@ import { changePassword, login } from '@/controllers/auth.controller'
 import { authService } from '@/services/auth.service'
 import { schedulerService } from '@/services/scheduler.service'
 import { whatsappService } from '@/services/whatsapp.service'
+import { initAntibanService } from '@/services/antiban.service'
 
 const app = express()
 const router = express.Router()
@@ -42,6 +43,8 @@ async function bootstrap() {
     await AppDataSource.runMigrations()
     logger.info('Database migrations executed')
   }
+
+  await initAntibanService()
 
   await authService.ensureDefaultAdminUser()
   logger.info(`Default admin ensured for ${config.AUTH.DEFAULT_ADMIN_EMAIL}`)
