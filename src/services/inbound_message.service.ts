@@ -75,10 +75,9 @@ function fillTemplate(template: string, values: Record<string, string>) {
   return Object.entries(values).reduce((result, [key, value]) => result.split(`{{${key}}}`).join(value), template)
 }
 
-function normalizeFlow(contact: ClientContact) {
-  if (contact.currentFlow === 'AWAITING_REPORT') {
-    contact.currentFlow = 'AWAITING_SERVICE'
-  }
+function normalizeFlow(_contact: ClientContact) {
+  // No-op: AWAITING_REPORT is used as an intermediate state after startCapture
+  // to discard messages sent before the user sees the Paso 1 prompt.
 }
 
 function resetDraft(contact: ClientContact) {
@@ -110,7 +109,7 @@ function buildConfirmationMessage(contact: ClientContact) {
 async function startCapture(contact: ClientContact, jid: string) {
   const settings = await botConfigurationService.get(contact.ownerPhoneNumber)
   resetDraft(contact)
-  contact.currentFlow = 'AWAITING_SERVICE'
+  contact.currentFlow = 'AWAITING_REPORT'
   await contact.save()
   if (settings.firstReplyEnabled) {
     await outboundMessageService.queueText({
@@ -174,6 +173,14 @@ export const inboundMessageService = {
 
     if (contact.currentFlow === 'IDLE') {
       await startCapture(contact, input.fromJid)
+      return
+    }
+
+    // Discard messages sent before the user sees the Paso 1 prompt.
+    // startCapture saves AWAITING_REPORT; transition to AWAITING_SERVICE and ignore the message.
+    if (contact.currentFlow === 'AWAITING_REPORT') {
+      contact.currentFlow = 'AWAITING_SERVICE'
+      await contact.save()
       return
     }
 
