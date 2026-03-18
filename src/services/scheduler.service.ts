@@ -4,11 +4,35 @@ import { config } from '@/config'
 import { NotificationDispatch } from '@/entities/notification_dispatch.entity'
 import { NotificationSchedule } from '@/entities/notification_schedule.entity'
 import { groupService } from './group.service'
+import { autoMessageService } from './auto_message.service'
 import { outboundMessageService } from './outbound_message.service'
 import { getTimeParts } from '@/utils/time'
 import { sleep } from '@/utils/sleep'
 import logger from '@/utils/logger'
 import { sessionOwnerService } from './session_owner.service'
+
+async function resolveMessageForGroup(ownerPhoneNumber: string, schedule: NotificationSchedule, groupIndex: number) {
+  const templateIds = schedule.messageTemplateIds ?? []
+
+  if (templateIds.length > 0) {
+    const messageId = templateIds[groupIndex % templateIds.length]
+    const message = await autoMessageService.findById(ownerPhoneNumber, messageId).catch(() => null)
+    if (message) {
+      return {
+        messageText: message.content || undefined,
+        mediaFilePath: message.image?.filePath ? path.resolve(config.PROJECT_ROOT, message.image.filePath) : undefined,
+        mediaAssetPath: message.image?.filePath,
+      }
+    }
+    logger.warn(`Schedule ${schedule.id}: could not resolve message template ${messageId} for group at index ${groupIndex}`)
+  }
+
+  return {
+    messageText: schedule.messageText,
+    mediaFilePath: schedule.mediaAsset?.filePath ? path.resolve(config.PROJECT_ROOT, schedule.mediaAsset.filePath) : undefined,
+    mediaAssetPath: schedule.mediaAsset?.filePath,
+  }
+}
 
 async function dispatchSchedule(schedule: NotificationSchedule, executionKey: string) {
   const ownerPhoneNumber = schedule.ownerPhoneNumber
@@ -26,7 +50,10 @@ async function dispatchSchedule(schedule: NotificationSchedule, executionKey: st
     return
   }
 
-  for (const groupJid of activeGroupJids) {
+  for (let i = 0; i < activeGroupJids.length; i++) {
+    const groupJid = activeGroupJids[i]
+    const { messageText, mediaFilePath, mediaAssetPath } = await resolveMessageForGroup(ownerPhoneNumber, schedule, i)
+
     const dispatch = await NotificationDispatch.save({
       ownerPhoneNumber,
       schedule,
@@ -35,28 +62,28 @@ async function dispatchSchedule(schedule: NotificationSchedule, executionKey: st
       status: 'PENDING',
       attempts: 0,
       executedAt: new Date(),
-      messageText: schedule.messageText,
-      mediaAssetPath: schedule.mediaAsset?.filePath,
+      messageText,
+      mediaAssetPath,
       errorMessage: undefined,
     })
 
-    if (schedule.mediaAsset?.filePath) {
+    if (mediaFilePath) {
       await outboundMessageService.queueMedia({
         ownerPhoneNumber,
         recipientJid: groupJid,
-        filePath: path.resolve(config.PROJECT_ROOT, schedule.mediaAsset.filePath),
-        caption: schedule.messageText,
+        filePath: mediaFilePath,
+        caption: messageText,
         sourceType: 'SCHEDULE',
         sourceId: schedule.id,
         maxAttempts: schedule.retryLimit,
         retryDelayMs: schedule.throttleMs,
         metadata: { dispatchId: dispatch.id },
       })
-    } else if (schedule.messageText) {
+    } else if (messageText) {
       await outboundMessageService.queueText({
         ownerPhoneNumber,
         recipientJid: groupJid,
-        text: schedule.messageText,
+        text: messageText,
         sourceType: 'SCHEDULE',
         sourceId: schedule.id,
         maxAttempts: schedule.retryLimit,

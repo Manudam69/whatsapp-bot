@@ -1,6 +1,5 @@
 import { NextFunction, Request, Response } from 'express'
 import { NotificationDispatch } from '@/entities/notification_dispatch.entity'
-import { autoMessageService } from '@/services/auto_message.service'
 import { groupService } from '@/services/group.service'
 import { notificationScheduleService } from '@/services/notification_schedule.service'
 import { panelAdminService } from '@/services/panel_admin.service'
@@ -29,7 +28,7 @@ async function mapScheduleResponse(ownerPhoneNumber: string, scheduleId: string)
 function normalizePayload(body: Record<string, unknown>) {
   return {
     name: String(body.name || ''),
-    messageId: String(body.messageId || ''),
+    messageIds: Array.isArray(body.messageIds) ? body.messageIds.map((item) => String(item)) : [],
     groupIds: Array.isArray(body.groupIds) ? body.groupIds.map((item) => String(item)) : [],
     days: Array.isArray(body.days) ? body.days.map((item) => String(item)) : [],
     time: String(body.time || '08:00'),
@@ -37,7 +36,7 @@ function normalizePayload(body: Record<string, unknown>) {
   }
 }
 
-export async function listSchedules(req: Request, res: Response, next: NextFunction) {
+export async function listSchedules(_req: Request, res: Response, next: NextFunction) {
   try {
     const ownerPhoneNumber = sessionOwnerService.getActiveOwnerPhoneNumber()
     if (!ownerPhoneNumber) {
@@ -74,17 +73,13 @@ export async function createSchedule(req: Request, res: Response, next: NextFunc
   try {
     const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
     const payload = normalizePayload(req.body ?? {})
-    const message = await autoMessageService.findById(ownerPhoneNumber, payload.messageId)
     const groupJids = await groupService.resolveGroupJids(ownerPhoneNumber, payload.groupIds, { activeOnly: true })
     const schedule = await notificationScheduleService.create(ownerPhoneNumber, {
       name: payload.name,
-      messageText: message.content,
       daysOfWeek: panelAdminService.toScheduleDays(payload.days),
       times: [payload.time],
       groupJids,
-      messageTemplateId: message.id,
-      mediaAssetId: message.image?.id,
-      isActive: true,
+      messageTemplateIds: payload.messageIds,
     })
     res.status(201).json(await mapScheduleResponse(ownerPhoneNumber, schedule.id))
   } catch (error) {
@@ -97,16 +92,13 @@ export async function updateSchedule(req: Request, res: Response, next: NextFunc
     const ownerPhoneNumber = sessionOwnerService.requireActiveOwnerPhoneNumber()
     const scheduleId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
     const payload = normalizePayload(req.body ?? {})
-    const message = await autoMessageService.findById(ownerPhoneNumber, payload.messageId)
     const groupJids = await groupService.resolveGroupJids(ownerPhoneNumber, payload.groupIds, { activeOnly: true })
     await notificationScheduleService.update(ownerPhoneNumber, scheduleId, {
       name: payload.name,
-      messageText: message.content,
       daysOfWeek: panelAdminService.toScheduleDays(payload.days),
       times: [payload.time],
       groupJids,
-      messageTemplateId: message.id,
-      mediaAssetId: message.image?.id,
+      messageTemplateIds: payload.messageIds,
     })
     res.json(await mapScheduleResponse(ownerPhoneNumber, scheduleId))
   } catch (error) {

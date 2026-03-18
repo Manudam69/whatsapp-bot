@@ -11,6 +11,7 @@ export type ScheduleInput = {
   times: string[]
   groupJids: string[]
   messageTemplateId?: string
+  messageTemplateIds?: string[]
   isActive?: boolean
   retryLimit?: number
   throttleMs?: number
@@ -21,8 +22,9 @@ function validate(input: ScheduleInput) {
   if (!input.name.trim()) {
     throw BadRequest('El nombre de la programación es obligatorio.')
   }
-  if (!input.messageText?.trim() && !input.mediaAssetId) {
-    throw BadRequest('La programación requiere texto, imagen o ambos.')
+  const hasTemplates = Array.isArray(input.messageTemplateIds) && input.messageTemplateIds.length > 0
+  if (!hasTemplates && !input.messageText?.trim() && !input.mediaAssetId) {
+    throw BadRequest('La programación requiere al menos un mensaje plantilla.')
   }
   if (!Array.isArray(input.daysOfWeek) || input.daysOfWeek.length === 0) {
     throw BadRequest('Debes indicar al menos un día de envío.')
@@ -55,6 +57,7 @@ export const notificationScheduleService = {
       times: input.times,
       groupJids: input.groupJids,
       messageTemplateId: input.messageTemplateId,
+      messageTemplateIds: input.messageTemplateIds ?? [],
       isActive: input.isActive ?? true,
       retryLimit: input.retryLimit ?? config.MAX_SEND_RETRIES,
       throttleMs: input.throttleMs ?? config.MESSAGE_THROTTLE_MS,
@@ -89,6 +92,9 @@ export const notificationScheduleService = {
     if (input.messageTemplateId !== undefined) {
       schedule.messageTemplateId = input.messageTemplateId
     }
+    if (input.messageTemplateIds !== undefined) {
+      schedule.messageTemplateIds = input.messageTemplateIds
+    }
     if (input.isActive !== undefined) {
       schedule.isActive = input.isActive
     }
@@ -108,6 +114,7 @@ export const notificationScheduleService = {
       times: schedule.times,
       groupJids: schedule.groupJids,
       messageTemplateId: schedule.messageTemplateId,
+      messageTemplateIds: schedule.messageTemplateIds,
       mediaAssetId: schedule.mediaAsset?.id,
     }
     validate(candidate)

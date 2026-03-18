@@ -110,10 +110,16 @@ export const panelAdminService = {
   },
 
   mapSchedule(schedule: NotificationSchedule, lastDispatch?: NotificationDispatch | null) {
+    const templateIds = schedule.messageTemplateIds?.length
+      ? schedule.messageTemplateIds
+      : schedule.messageTemplateId
+        ? [schedule.messageTemplateId]
+        : []
+
     return {
       id: schedule.id,
       name: schedule.name,
-      messageId: schedule.messageTemplateId || '',
+      messageIds: templateIds,
       groupIds: schedule.groupJids,
       days: schedule.daysOfWeek.map((day) => numberToDayName[day as keyof typeof numberToDayName]).filter(Boolean),
       time: schedule.times[0] || '08:00',
