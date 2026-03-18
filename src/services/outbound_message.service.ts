@@ -1,6 +1,7 @@
 import { config } from '@/config'
 import { NotificationDispatch } from '@/entities/notification_dispatch.entity'
 import { OutboundMessage, OutboundMessageSource } from '@/entities/outbound_message.entity'
+import { BotConfiguration } from '@/entities/bot_configuration.entity'
 import { reportService } from './report.service'
 import { sleep } from '@/utils/sleep'
 import logger from '@/utils/logger'
@@ -135,7 +136,9 @@ class OutboundMessageService {
       // Antiban rate limiting applies only to scheduled notifications.
       // Bot replies (FLOW_REPLY, REPORT_FORWARD, REPORT_STATUS_UPDATE) bypass it.
       if (isScheduled) {
-        const decision = await antibanService.beforeSend(message.recipientJid, content)
+        const botConfig = await BotConfiguration.findOne({ where: { ownerPhoneNumber: message.ownerPhoneNumber } })
+        const skipIdenticalCheck = botConfig?.skipIdenticalMessageCheck ?? false
+        const decision = await antibanService.beforeSend(message.recipientJid, content, { skipIdenticalCheck })
         if (!decision.allowed) {
           // Scheduled messages are time-sensitive — mark as FAILED instead of
           // leaving as PENDING, since delivering them the next day is incorrect.

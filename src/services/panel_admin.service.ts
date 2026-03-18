@@ -173,6 +173,7 @@ export const panelAdminService = {
       reviewedReplyText: settings.reviewedReplyText,
       resolvedReplyText: settings.resolvedReplyText,
       strategy: settings.strategy,
+      skipIdenticalMessageCheck: settings.skipIdenticalMessageCheck,
     }
   },
 

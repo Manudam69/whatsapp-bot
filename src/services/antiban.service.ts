@@ -194,15 +194,17 @@ export class AntiBan {
   // Public API
   // ---------------------------------------------------------------------------
 
-  async beforeSend(recipient: string, content: string): Promise<SendDecision> {
+  async beforeSend(recipient: string, content: string, options?: { skipIdenticalCheck?: boolean }): Promise<SendDecision> {
     if (this.isPaused) {
       return { allowed: false, delayMs: 0, reason: 'antiban: sending is paused due to high risk' }
     }
 
-    // Identical message check
-    const identicalCount = (this.recentMessages.get(content) ?? 0) + 1
-    if (identicalCount > this.cfg.maxIdenticalMessages) {
-      return { allowed: false, delayMs: 0, reason: `antiban: identical message blocked after ${this.cfg.maxIdenticalMessages} sends` }
+    // Identical message check (can be skipped for scheduled notifications via config)
+    if (!options?.skipIdenticalCheck) {
+      const identicalCount = (this.recentMessages.get(content) ?? 0) + 1
+      if (identicalCount > this.cfg.maxIdenticalMessages) {
+        return { allowed: false, delayMs: 0, reason: `antiban: identical message blocked after ${this.cfg.maxIdenticalMessages} sends` }
+      }
     }
 
     // Rate limit checks

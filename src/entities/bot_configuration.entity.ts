@@ -16,6 +16,7 @@ export interface BotConfigurationSettings {
   reviewedReplyText: string
   resolvedReplyText: string
   strategy: BotStrategy
+  skipIdenticalMessageCheck: boolean
 }
 
 export const DEFAULT_REVIEWED_REPLY_TEXT = [
@@ -50,6 +51,7 @@ const DEFAULT_SETTINGS: BotConfigurationSettings = {
   reviewedReplyText: DEFAULT_REVIEWED_REPLY_TEXT,
   resolvedReplyText: DEFAULT_RESOLVED_REPLY_TEXT,
   strategy: 'hybrid-automation',
+  skipIdenticalMessageCheck: false,
 }
 
 function normalizeOptionalText(value?: string | null) {
@@ -199,5 +201,13 @@ export class BotConfiguration extends EntityBase {
 
   set strategy(value: BotStrategy) {
     this.setSetting('strategy', value)
+  }
+
+  get skipIdenticalMessageCheck() {
+    return this.getSetting('skipIdenticalMessageCheck')
+  }
+
+  set skipIdenticalMessageCheck(value: boolean) {
+    this.setSetting('skipIdenticalMessageCheck', value)
   }
 }
