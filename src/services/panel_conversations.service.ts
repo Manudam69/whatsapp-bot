@@ -5,6 +5,7 @@ import { ClientContact } from '@/entities/client_contact.entity'
 import { InboundMessage } from '@/entities/inbound_message.entity'
 import { OutboundMessage } from '@/entities/outbound_message.entity'
 import { NotFound } from '@/middlewares/error_handler'
+import { inboundMessageService } from './inbound_message.service'
 
 type ConversationDirection = 'inbound' | 'outbound'
 type ConversationMessageStatus = 'sent' | 'pending' | 'failed'
@@ -204,6 +205,85 @@ export const panelConversationsService = {
         lastInboundAt: formatDate(contact.lastInboundAt),
       },
       messages,
+    }
+  },
+
+  async recoverPending(clientId: string) {
+    const contacts = await ClientContact.find({ where: { clientId }, order: { updatedAt: 'ASC' } })
+    if (contacts.length === 0) {
+      return { scannedContacts: 0, recoveredContacts: 0, replayedMessages: 0, skippedContacts: 0, recovered: [] as Array<{ contactId: string; contactName: string; replayedMessages: number; flowStatus: string }> }
+    }
+
+    const contactIds = contacts.map((contact) => contact.id)
+    const contactJids = contacts.map((contact) => contact.whatsappJid)
+    const sessionIds = [...new Set(contacts.map((contact) => contact.sessionId))]
+
+    const [inboundMessages, outboundMessages] = await Promise.all([
+      InboundMessage.find({
+        where: { contact: { id: In(contactIds) } },
+        order: { receivedAt: 'ASC', createdAt: 'ASC' },
+      }),
+      OutboundMessage.find({
+        where: { sessionId: In(sessionIds), recipientJid: In(contactJids) },
+        order: { sentAt: 'ASC', lastAttemptAt: 'ASC', createdAt: 'ASC' },
+      }),
+    ])
+
+    const inboundByContactId = new Map<string, InboundMessage[]>()
+    for (const message of inboundMessages) {
+      const list = inboundByContactId.get(message.contact.id) || []
+      list.push(message)
+      inboundByContactId.set(message.contact.id, list)
+    }
+
+    const outboundByConversationKey = new Map<string, OutboundMessage[]>()
+    for (const message of outboundMessages) {
+      const key = `${message.sessionId}:${message.recipientJid}`
+      const list = outboundByConversationKey.get(key) || []
+      list.push(message)
+      outboundByConversationKey.set(key, list)
+    }
+
+    const recovered: Array<{ contactId: string; contactName: string; replayedMessages: number; flowStatus: string }> = []
+    let replayedMessages = 0
+    let skippedContacts = 0
+
+    for (const contact of contacts) {
+      const inboundForContact = inboundByContactId.get(contact.id) || []
+      if (inboundForContact.length === 0) {
+        skippedContacts += 1
+        continue
+      }
+
+      const outboundForContact = outboundByConversationKey.get(`${contact.sessionId}:${contact.whatsappJid}`) || []
+      const latestOutbound = outboundForContact[outboundForContact.length - 1]
+      const latestOutboundAt = latestOutbound ? outboundTimestamp(latestOutbound).getTime() : 0
+      const pendingInbound = inboundForContact.filter((message) => message.messageType === 'text' && inboundTimestamp(message).getTime() > latestOutboundAt)
+
+      if (pendingInbound.length === 0) {
+        skippedContacts += 1
+        continue
+      }
+
+      for (const message of pendingInbound) {
+        await inboundMessageService.replayStoredMessage(message)
+      }
+
+      replayedMessages += pendingInbound.length
+      recovered.push({
+        contactId: contact.id,
+        contactName: contact.contactName || contact.phoneNumber,
+        replayedMessages: pendingInbound.length,
+        flowStatus: contact.currentFlow,
+      })
+    }
+
+    return {
+      scannedContacts: contacts.length,
+      recoveredContacts: recovered.length,
+      replayedMessages,
+      skippedContacts,
+      recovered,
     }
   },
 }

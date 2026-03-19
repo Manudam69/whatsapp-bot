@@ -162,6 +162,171 @@ async function findLatestServicePrompt(contact: ClientContact, jid: string) {
   })
 }
 
+async function processTextForContact(contact: ClientContact, input: {
+  sessionId: string
+  clientId: string
+  fromJid: string
+  text: string
+  rawPayload?: Record<string, unknown>
+}) {
+  const trimmedText = input.text.trim()
+  if (!trimmedText) {
+    return
+  }
+
+  normalizeFlow(contact)
+
+  const { sessionId, clientId } = input
+
+  if (trimmedText.toUpperCase() === CANCEL_COMMAND) {
+    resetDraft(contact)
+    await contact.save()
+    await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.cancelled, sourceType: 'FLOW_REPLY' })
+    return
+  }
+
+  if (contact.currentFlow === 'IDLE') {
+    await startCapture(contact, input.fromJid)
+    return
+  }
+
+  if (contact.currentFlow === 'AWAITING_REPORT') {
+    const servicePrompt = await findLatestServicePrompt(contact, input.fromJid)
+    const messageTimestamp = getMessageTimestamp(input.rawPayload)
+
+    if (!servicePrompt?.sentAt) {
+      return
+    }
+
+    if (messageTimestamp !== null && messageTimestamp <= servicePrompt.sentAt.getTime()) {
+      return
+    }
+
+    contact.currentFlow = 'AWAITING_SERVICE'
+    await contact.save()
+  }
+
+  if (contact.currentFlow === 'AWAITING_SERVICE') {
+    if (trimmedText.length < SERVICE_MIN_LENGTH) {
+      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.invalidService, sourceType: 'FLOW_REPLY' })
+      return
+    }
+    contact.draftServiceName = trimmedText
+    contact.currentFlow = 'AWAITING_DATE'
+    await contact.save()
+    await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.date, sourceType: 'FLOW_REPLY' })
+    return
+  }
+
+  if (contact.currentFlow === 'AWAITING_DATE') {
+    if (!isValidDate(trimmedText)) {
+      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: pickVariant(INVALID_DATE_VARIANTS), sourceType: 'FLOW_REPLY' })
+      return
+    }
+    contact.draftIncidentDate = trimmedText
+    contact.currentFlow = 'AWAITING_TIME'
+    await contact.save()
+    await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.time, sourceType: 'FLOW_REPLY' })
+    return
+  }
+
+  if (contact.currentFlow === 'AWAITING_TIME') {
+    if (!isValidTime(trimmedText)) {
+      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: pickVariant(INVALID_TIME_VARIANTS), sourceType: 'FLOW_REPLY' })
+      return
+    }
+    contact.draftIncidentTime = trimmedText
+    contact.currentFlow = 'AWAITING_INCIDENT'
+    await contact.save()
+    await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.incident, sourceType: 'FLOW_REPLY' })
+    return
+  }
+
+  if (contact.currentFlow === 'AWAITING_INCIDENT') {
+    if (trimmedText.length < INCIDENT_MIN_LENGTH) {
+      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.invalidIncident, sourceType: 'FLOW_REPLY' })
+      return
+    }
+    contact.draftIncidentText = trimmedText
+    contact.currentFlow = 'AWAITING_CONFIRMATION'
+    await contact.save()
+    await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: buildConfirmationMessage(contact), sourceType: 'FLOW_REPLY' })
+    return
+  }
+
+  if (contact.currentFlow !== 'AWAITING_CONFIRMATION') {
+    await startCapture(contact, input.fromJid)
+    return
+  }
+
+  const normalizedConfirmation = trimmedText.toUpperCase()
+  if (normalizedConfirmation === 'NO') {
+    contact.currentFlow = 'AWAITING_SERVICE'
+    contact.draftServiceName = undefined
+    contact.draftIncidentDate = undefined
+    contact.draftIncidentTime = undefined
+    contact.draftIncidentText = undefined
+    await contact.save()
+    await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.restart, sourceType: 'FLOW_REPLY' })
+    await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.service, sourceType: 'FLOW_REPLY' })
+    return
+  }
+
+  if (normalizedConfirmation !== 'SI' && normalizedConfirmation !== 'SÍ') {
+    await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.invalidConfirmation, sourceType: 'FLOW_REPLY' })
+    return
+  }
+
+  const parsed = buildDraft(contact)
+  const sourceMessage = `Servicio: ${parsed.serviceName} | Fecha: ${parsed.incidentDate} | Hora: ${parsed.incidentTime} | Incidencia: ${parsed.incidentText}`
+
+  const report = await reportService.createFromInbound(contact, parsed, sourceMessage)
+  const settings = await botConfigurationService.get(clientId, sessionId)
+  const configuredOperationsGroupJid = settings.operationalGroupId || reportService.getOperationsGroupJid()
+  const operationsGroupJid = configuredOperationsGroupJid
+    ? await groupService.resolveGroupJid(sessionId, configuredOperationsGroupJid, { activeOnly: true })
+    : null
+
+  try {
+    if (!operationsGroupJid) {
+      throw new Error('OPERATIONS_GROUP_JID is not configured')
+    }
+
+    await reportService.markQueued(report, operationsGroupJid)
+    await outboundMessageService.queueText({
+      sessionId,
+      recipientJid: operationsGroupJid,
+      text: formatReportMessage(report),
+      sourceType: 'REPORT_FORWARD',
+      sourceId: report.id,
+      metadata: { groupJid: operationsGroupJid },
+    })
+    resetDraft(contact)
+    await contact.save()
+    if (settings.confirmationEnabled) {
+      await outboundMessageService.queueText({
+        sessionId,
+        recipientJid: input.fromJid,
+        text: fillTemplate(PROMPTS.confirmed, { folio: report.folio }),
+        sourceType: 'FLOW_REPLY',
+      })
+    }
+  } catch (error) {
+    logger.error(`Failed to forward incident report ${report.folio}: ${error instanceof Error ? error.message : String(error)}`)
+    await reportService.markFailed(report, operationsGroupJid || undefined)
+    resetDraft(contact)
+    await contact.save()
+    if (settings.confirmationEnabled) {
+      await outboundMessageService.queueText({
+        sessionId,
+        recipientJid: input.fromJid,
+        text: fillTemplate(PROMPTS.confirmed, { folio: report.folio }),
+        sourceType: 'FLOW_REPLY',
+      })
+    }
+  }
+}
+
 export const inboundMessageService = {
   async processIncomingText(input: {
     sessionId: string
@@ -193,7 +358,6 @@ export const inboundMessageService = {
       input.contactName,
       input.rawPayload,
     )
-    normalizeFlow(contact)
 
     await InboundMessage.save({
       sessionId: input.sessionId,
@@ -206,154 +370,23 @@ export const inboundMessageService = {
       rawPayload: input.rawPayload,
     })
 
-    const { sessionId, clientId } = input
+    await processTextForContact(contact, {
+      sessionId: input.sessionId,
+      clientId: input.clientId,
+      fromJid: input.fromJid,
+      text: trimmedText,
+      rawPayload: input.rawPayload,
+    })
+  },
 
-    if (trimmedText.toUpperCase() === CANCEL_COMMAND) {
-      resetDraft(contact)
-      await contact.save()
-      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.cancelled, sourceType: 'FLOW_REPLY' })
-      return
-    }
-
-    if (contact.currentFlow === 'IDLE') {
-      await startCapture(contact, input.fromJid)
-      return
-    }
-
-    if (contact.currentFlow === 'AWAITING_REPORT') {
-      const servicePrompt = await findLatestServicePrompt(contact, input.fromJid)
-      const messageTimestamp = getMessageTimestamp(input.rawPayload)
-
-      if (!servicePrompt?.sentAt) {
-        return
-      }
-
-      if (messageTimestamp !== null && messageTimestamp <= servicePrompt.sentAt.getTime()) {
-        return
-      }
-
-      contact.currentFlow = 'AWAITING_SERVICE'
-      await contact.save()
-    }
-
-    if (contact.currentFlow === 'AWAITING_SERVICE') {
-      if (trimmedText.length < SERVICE_MIN_LENGTH) {
-        await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.invalidService, sourceType: 'FLOW_REPLY' })
-        return
-      }
-      contact.draftServiceName = trimmedText
-      contact.currentFlow = 'AWAITING_DATE'
-      await contact.save()
-      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.date, sourceType: 'FLOW_REPLY' })
-      return
-    }
-
-    if (contact.currentFlow === 'AWAITING_DATE') {
-      if (!isValidDate(trimmedText)) {
-        await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: pickVariant(INVALID_DATE_VARIANTS), sourceType: 'FLOW_REPLY' })
-        return
-      }
-      contact.draftIncidentDate = trimmedText
-      contact.currentFlow = 'AWAITING_TIME'
-      await contact.save()
-      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.time, sourceType: 'FLOW_REPLY' })
-      return
-    }
-
-    if (contact.currentFlow === 'AWAITING_TIME') {
-      if (!isValidTime(trimmedText)) {
-        await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: pickVariant(INVALID_TIME_VARIANTS), sourceType: 'FLOW_REPLY' })
-        return
-      }
-      contact.draftIncidentTime = trimmedText
-      contact.currentFlow = 'AWAITING_INCIDENT'
-      await contact.save()
-      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.incident, sourceType: 'FLOW_REPLY' })
-      return
-    }
-
-    if (contact.currentFlow === 'AWAITING_INCIDENT') {
-      if (trimmedText.length < INCIDENT_MIN_LENGTH) {
-        await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.invalidIncident, sourceType: 'FLOW_REPLY' })
-        return
-      }
-      contact.draftIncidentText = trimmedText
-      contact.currentFlow = 'AWAITING_CONFIRMATION'
-      await contact.save()
-      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: buildConfirmationMessage(contact), sourceType: 'FLOW_REPLY' })
-      return
-    }
-
-    if (contact.currentFlow !== 'AWAITING_CONFIRMATION') {
-      await startCapture(contact, input.fromJid)
-      return
-    }
-
-    const normalizedConfirmation = trimmedText.toUpperCase()
-    if (normalizedConfirmation === 'NO') {
-      contact.currentFlow = 'AWAITING_SERVICE'
-      contact.draftServiceName = undefined
-      contact.draftIncidentDate = undefined
-      contact.draftIncidentTime = undefined
-      contact.draftIncidentText = undefined
-      await contact.save()
-      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.restart, sourceType: 'FLOW_REPLY' })
-      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.service, sourceType: 'FLOW_REPLY' })
-      return
-    }
-
-    if (normalizedConfirmation !== 'SI' && normalizedConfirmation !== 'SÍ') {
-      await outboundMessageService.queueText({ sessionId, recipientJid: input.fromJid, text: PROMPTS.invalidConfirmation, sourceType: 'FLOW_REPLY' })
-      return
-    }
-
-    const parsed = buildDraft(contact)
-    const sourceMessage = `Servicio: ${parsed.serviceName} | Fecha: ${parsed.incidentDate} | Hora: ${parsed.incidentTime} | Incidencia: ${parsed.incidentText}`
-
-    const report = await reportService.createFromInbound(contact, parsed, sourceMessage)
-    const settings = await botConfigurationService.get(clientId, sessionId)
-    const configuredOperationsGroupJid = settings.operationalGroupId || reportService.getOperationsGroupJid()
-    const operationsGroupJid = configuredOperationsGroupJid
-      ? await groupService.resolveGroupJid(sessionId, configuredOperationsGroupJid, { activeOnly: true })
-      : null
-
-    try {
-      if (!operationsGroupJid) {
-        throw new Error('OPERATIONS_GROUP_JID is not configured')
-      }
-
-      await reportService.markQueued(report, operationsGroupJid)
-      await outboundMessageService.queueText({
-        sessionId,
-        recipientJid: operationsGroupJid,
-        text: formatReportMessage(report),
-        sourceType: 'REPORT_FORWARD',
-        sourceId: report.id,
-        metadata: { groupJid: operationsGroupJid },
-      })
-      resetDraft(contact)
-      await contact.save()
-      if (settings.confirmationEnabled) {
-        await outboundMessageService.queueText({
-          sessionId,
-          recipientJid: input.fromJid,
-          text: fillTemplate(PROMPTS.confirmed, { folio: report.folio }),
-          sourceType: 'FLOW_REPLY',
-        })
-      }
-    } catch (error) {
-      logger.error(`Failed to forward incident report ${report.folio}: ${error instanceof Error ? error.message : String(error)}`)
-      await reportService.markFailed(report, operationsGroupJid || undefined)
-      resetDraft(contact)
-      await contact.save()
-      if (settings.confirmationEnabled) {
-        await outboundMessageService.queueText({
-          sessionId,
-          recipientJid: input.fromJid,
-          text: fillTemplate(PROMPTS.confirmed, { folio: report.folio }),
-          sourceType: 'FLOW_REPLY',
-        })
-      }
-    }
+  async replayStoredMessage(message: InboundMessage) {
+    const contact = message.contact
+    await processTextForContact(contact, {
+      sessionId: message.sessionId,
+      clientId: contact.clientId,
+      fromJid: message.fromJid,
+      text: message.body,
+      rawPayload: message.rawPayload,
+    })
   },
 }

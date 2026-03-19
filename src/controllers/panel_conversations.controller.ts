@@ -19,3 +19,12 @@ export async function getConversation(req: Request, res: Response, next: NextFun
     next(error)
   }
 }
+
+export async function recoverPendingConversations(req: Request, res: Response, next: NextFunction) {
+  try {
+    const clientId = req.authUser!.clientId
+    res.json(await panelConversationsService.recoverPending(clientId))
+  } catch (error) {
+    next(error)
+  }
+}
