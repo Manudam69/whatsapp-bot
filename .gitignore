@@ -4,6 +4,7 @@ build/
 .env
 logs/
 uploads/media/
+uploads/
 auth/
 *.log
 data/
