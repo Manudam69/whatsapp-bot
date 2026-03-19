@@ -4,6 +4,7 @@ import { NotificationDispatch } from '@/entities/notification_dispatch.entity'
 import { OutboundMessage, OutboundMessageSource } from '@/entities/outbound_message.entity'
 import { BotConfiguration } from '@/entities/bot_configuration.entity'
 import { reportService } from './report.service'
+import { sseService } from './sse.service'
 import { sleep } from '@/utils/sleep'
 import logger from '@/utils/logger'
 import { antibanService } from './antiban.service'
@@ -303,6 +304,8 @@ class OutboundMessageService {
     dispatch.executedAt = message.sentAt || message.lastAttemptAt || new Date()
     dispatch.errorMessage = status === 'FAILED' ? message.errorMessage : undefined
     await dispatch.save()
+
+    sseService.emit(dispatch.clientId, 'dashboard:refresh')
   }
 }
 

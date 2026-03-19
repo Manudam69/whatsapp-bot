@@ -2,6 +2,7 @@ import { NextFunction, Request, Response } from 'express'
 import { BadRequest } from '@/middlewares/error_handler'
 import { mediaAssetService } from '@/services/media_asset.service'
 import { panelAdminService } from '@/services/panel_admin.service'
+import { sseService } from '@/services/sse.service'
 
 export async function listImages(req: Request, res: Response, next: NextFunction) {
   try {
@@ -28,7 +29,9 @@ export async function createImage(req: Request, res: Response, next: NextFunctio
       mimeType: req.file.mimetype,
     })
 
-    res.status(201).json(panelAdminService.mapImage(req, asset))
+    const created = panelAdminService.mapImage(req, asset)
+    sseService.emit(clientId, 'image:created', created)
+    res.status(201).json(created)
   } catch (error) {
     next(error)
   }
@@ -38,7 +41,9 @@ export async function deleteImage(req: Request, res: Response, next: NextFunctio
   try {
     const clientId = req.authUser!.clientId
     const imageId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
-    res.json(await mediaAssetService.remove(clientId, imageId))
+    const result = await mediaAssetService.remove(clientId, imageId)
+    sseService.emit(clientId, 'image:deleted', { id: imageId })
+    res.json(result)
   } catch (error) {
     next(error)
   }
@@ -52,7 +57,9 @@ export async function updateImage(req: Request, res: Response, next: NextFunctio
       name: req.body?.name,
     })
 
-    res.json(panelAdminService.mapImage(req, asset))
+    const updated = panelAdminService.mapImage(req, asset)
+    sseService.emit(clientId, 'image:updated', updated)
+    res.json(updated)
   } catch (error) {
     next(error)
   }

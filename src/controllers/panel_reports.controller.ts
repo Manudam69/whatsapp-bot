@@ -4,6 +4,7 @@ import { BadRequest } from '@/middlewares/error_handler'
 import { formatReportStatusNotification, reportService } from '@/services/report.service'
 import { panelAdminService } from '@/services/panel_admin.service'
 import { outboundMessageService } from '@/services/outbound_message.service'
+import { sseService } from '@/services/sse.service'
 import logger from '@/utils/logger'
 import { IncidentReport } from '@/entities/incident_report.entity'
 
@@ -28,7 +29,9 @@ export async function archiveReport(req: Request, res: Response, next: NextFunct
     const isArchived = req.body?.isArchived === true
 
     const report = await reportService.setArchived(clientId, reportId, isArchived)
-    res.json(panelAdminService.mapReport(req, report))
+    const mapped = panelAdminService.mapReport(req, report)
+    sseService.emit(clientId, 'report:archived', mapped)
+    res.json(mapped)
   } catch (error) {
     next(error)
   }
@@ -78,7 +81,10 @@ export async function updateReport(req: Request, res: Response, next: NextFuncti
       }
     }
 
-    res.json(panelAdminService.mapReport(req, report))
+    const mapped = panelAdminService.mapReport(req, report)
+    sseService.emit(clientId, 'report:updated', mapped)
+    sseService.emit(clientId, 'dashboard:refresh')
+    res.json(mapped)
   } catch (error) {
     next(error)
   }

@@ -4,6 +4,7 @@ import { autoMessageService } from '@/services/auto_message.service'
 import { groupService } from '@/services/group.service'
 import { notificationScheduleService } from '@/services/notification_schedule.service'
 import { panelAdminService } from '@/services/panel_admin.service'
+import { sseService } from '@/services/sse.service'
 import { whatsappSessionManager } from '@/services/whatsapp_session_manager.service'
 
 function getFirstSessionId(clientId: string): string | undefined {
@@ -55,7 +56,9 @@ export async function createMessage(req: Request, res: Response, next: NextFunct
       ...req.body,
       groupIds,
     })
-    res.status(201).json(panelAdminService.mapMessage(message))
+    const created = panelAdminService.mapMessage(message)
+    sseService.emit(clientId, 'message:created', created)
+    res.status(201).json(created)
   } catch (error) {
     next(error)
   }
@@ -79,7 +82,9 @@ export async function updateMessage(req: Request, res: Response, next: NextFunct
       ...req.body,
       groupIds,
     })
-    res.json(panelAdminService.mapMessage(message))
+    const updated = panelAdminService.mapMessage(message)
+    sseService.emit(clientId, 'message:updated', updated)
+    res.json(updated)
   } catch (error) {
     next(error)
   }
@@ -96,6 +101,7 @@ export async function deleteMessage(req: Request, res: Response, next: NextFunct
       .where('client_id = :clientId', { clientId })
       .andWhere('message_template_id = :messageId', { messageId })
       .execute()
+    sseService.emit(clientId, 'message:deleted', { id: messageId })
     res.json(result)
   } catch (error) {
     next(error)

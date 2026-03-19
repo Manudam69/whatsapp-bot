@@ -3,6 +3,7 @@ import type { BotConfigurationSettings } from '@/entities/bot_configuration.enti
 import { ClientContact } from '@/entities/client_contact.entity'
 import { IncidentReport } from '@/entities/incident_report.entity'
 import { NotFound } from '@/middlewares/error_handler'
+import { sseService } from './sse.service'
 import { groupService } from './group.service'
 import { ParsedIncidentReport } from './report_parser.service'
 
@@ -90,6 +91,10 @@ export const reportService = {
     await report.save()
     contact.lastReportAt = new Date()
     await contact.save()
+
+    sseService.emit(contact.clientId, 'report:created', { id: report.id })
+    sseService.emit(contact.clientId, 'dashboard:refresh')
+
     return report
   },
 

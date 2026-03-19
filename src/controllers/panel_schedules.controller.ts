@@ -5,6 +5,7 @@ import { OutboundMessage } from '@/entities/outbound_message.entity'
 import { groupService } from '@/services/group.service'
 import { notificationScheduleService } from '@/services/notification_schedule.service'
 import { panelAdminService } from '@/services/panel_admin.service'
+import { sseService } from '@/services/sse.service'
 import { whatsappSessionManager } from '@/services/whatsapp_session_manager.service'
 import { NotFound } from '@/middlewares/error_handler'
 import logger from '@/utils/logger'
@@ -101,7 +102,10 @@ export async function createSchedule(req: Request, res: Response, next: NextFunc
       groupJids,
       messageTemplateIds: payload.messageIds,
     })
-    res.status(201).json(await mapScheduleResponse(clientId, schedule.id))
+    const created = await mapScheduleResponse(clientId, schedule.id)
+    sseService.emit(clientId, 'schedule:created', created)
+    sseService.emit(clientId, 'dashboard:refresh')
+    res.status(201).json(created)
   } catch (error) {
     next(error)
   }
@@ -124,7 +128,10 @@ export async function updateSchedule(req: Request, res: Response, next: NextFunc
       groupJids,
       messageTemplateIds: payload.messageIds,
     })
-    res.json(await mapScheduleResponse(clientId, scheduleId))
+    const updated = await mapScheduleResponse(clientId, scheduleId)
+    sseService.emit(clientId, 'schedule:updated', updated)
+    sseService.emit(clientId, 'dashboard:refresh')
+    res.json(updated)
   } catch (error) {
     next(error)
   }
@@ -134,7 +141,10 @@ export async function deleteSchedule(req: Request, res: Response, next: NextFunc
   try {
     const clientId = req.authUser!.clientId
     const scheduleId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
-    res.json(await notificationScheduleService.remove(clientId, scheduleId))
+    const result = await notificationScheduleService.remove(clientId, scheduleId)
+    sseService.emit(clientId, 'schedule:deleted', { id: scheduleId })
+    sseService.emit(clientId, 'dashboard:refresh')
+    res.json(result)
   } catch (error) {
     next(error)
   }
@@ -240,7 +250,10 @@ export async function toggleSchedule(req: Request, res: Response, next: NextFunc
     const scheduleId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id
     const isActive = req.path.endsWith('/activate')
     await notificationScheduleService.update(clientId, scheduleId, { isActive })
-    res.json(await mapScheduleResponse(clientId, scheduleId))
+    const toggled = await mapScheduleResponse(clientId, scheduleId)
+    sseService.emit(clientId, 'schedule:updated', toggled)
+    sseService.emit(clientId, 'dashboard:refresh')
+    res.json(toggled)
   } catch (error) {
     next(error)
   }
