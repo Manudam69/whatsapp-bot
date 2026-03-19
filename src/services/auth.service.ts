@@ -1,9 +1,9 @@
 import { randomBytes, scryptSync, timingSafeEqual } from 'crypto'
 import jwt, { SignOptions } from 'jsonwebtoken'
 import { config } from '@/config'
+import { Client } from '@/entities/client.entity'
 import { User } from '@/entities/user.entity'
 import { BadRequest, Unauthorized } from '@/middlewares/error_handler'
-import { AppDataSource } from '@/database/datasource'
 
 const KEY_LENGTH = 64
 
@@ -115,15 +115,26 @@ export const authService = {
       return existing
     }
 
-    // Find the first client to assign the default admin user to
-    const clients = await AppDataSource.query<Array<{ id: string }>>('SELECT "id" FROM "clients" ORDER BY "created_at" ASC LIMIT 1')
-    const clientId = clients[0]?.id
-    if (!clientId) {
-      throw new Error('No clients found. Run migrations before starting the server.')
+    // Ensure the default client exists (create if not found by name)
+    let client = await Client.findOne({ where: { name: config.AUTH.DEFAULT_CLIENT_NAME } })
+    if (!client) {
+      client = await Client.save({
+        name: config.AUTH.DEFAULT_CLIENT_NAME,
+        displayName: config.AUTH.DEFAULT_CLIENT_DISPLAY_NAME,
+        displayLogo: null,
+        secrets: null,
+        flags: null,
+        publicConfig: null,
+        emailConfig: null,
+        customization: null,
+        enabledEntities: null,
+        disabledEntities: null,
+        clientClass: null,
+      })
     }
 
     return User.save({
-      clientId,
+      clientId: client.id,
       name: config.AUTH.DEFAULT_ADMIN_NAME,
       email,
       role: 'admin',

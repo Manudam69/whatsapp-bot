@@ -53,6 +53,8 @@ export const config = Object.freeze({
   AUTH: {
     JWT_SECRET: readEnv('JWT_SECRET'),
     TOKEN_EXPIRES_IN: process.env.JWT_EXPIRES_IN || '12h',
+    DEFAULT_CLIENT_NAME: readEnv('DEFAULT_CLIENT_NAME'),
+    DEFAULT_CLIENT_DISPLAY_NAME: readEnv('DEFAULT_CLIENT_DISPLAY_NAME'),
     DEFAULT_ADMIN_NAME: readEnv('DEFAULT_ADMIN_NAME'),
     DEFAULT_ADMIN_EMAIL: readEnv('DEFAULT_ADMIN_EMAIL'),
     DEFAULT_ADMIN_PASSWORD: readEnv('DEFAULT_ADMIN_PASSWORD'),
@@ -70,6 +72,8 @@ export const config = Object.freeze({
 export function validateConfig() {
   const missingVariables = [
     'JWT_SECRET',
+    'DEFAULT_CLIENT_NAME',
+    'DEFAULT_CLIENT_DISPLAY_NAME',
     'DEFAULT_ADMIN_NAME',
     'DEFAULT_ADMIN_EMAIL',
     'DEFAULT_ADMIN_PASSWORD',

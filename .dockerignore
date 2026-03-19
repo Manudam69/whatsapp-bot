@@ -1,0 +1,13 @@
+node_modules
+build
+dist
+logs
+auth
+uploads
+data
+.env
+.env.*
+!.env.example
+*.log
+.git
+.gitignore
