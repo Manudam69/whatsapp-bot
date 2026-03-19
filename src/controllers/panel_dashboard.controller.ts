@@ -1,5 +1,5 @@
 import { NextFunction, Request, Response } from 'express'
-import { In } from 'typeorm'
+import { In, MoreThanOrEqual } from 'typeorm'
 import { AutoMessage } from '@/entities/auto_message.entity'
 import { IncidentReport } from '@/entities/incident_report.entity'
 import { NotificationDispatch } from '@/entities/notification_dispatch.entity'
@@ -18,13 +18,18 @@ export async function getDashboardOverview(req: Request, res: Response, next: Ne
     const connectedSession = clientSessions.find((s) => s.isConnected())
     const sessionState = connectedSession?.getSessionState() ?? clientSessions[0]?.getSessionState() ?? { status: 'idle' as const }
 
+    const now = Date.now()
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const last24Hours = new Date(now - (24 * 60 * 60 * 1000))
+
     const [groups, schedules, reports, dispatches, messages, pendingOutbound, conversations] = await Promise.all([
       sessionIds.length > 0
         ? WhatsappGroup.find({ where: { sessionId: In(sessionIds), isMember: true } })
         : Promise.resolve([]),
       NotificationSchedule.find({ where: { clientId } }),
       IncidentReport.find({ where: { clientId }, order: { receivedAt: 'DESC' }, take: 50 }),
-      NotificationDispatch.find({ where: { clientId }, order: { executedAt: 'DESC' }, take: 100 }),
+      NotificationDispatch.find({ where: { clientId, executedAt: MoreThanOrEqual(last24Hours) }, order: { executedAt: 'DESC' } }),
       AutoMessage.find({ where: { clientId } }),
       sessionIds.length > 0
         ? OutboundMessage.count({ where: { sessionId: In(sessionIds), status: 'PENDING' } })
@@ -32,24 +37,18 @@ export async function getDashboardOverview(req: Request, res: Response, next: Ne
       panelConversationsService.list(req, clientId, 5),
     ])
 
-    const now = Date.now()
-    const today = new Date()
-    today.setHours(0, 0, 0, 0)
-    const last24Hours = now - (24 * 60 * 60 * 1000)
-
     const dispatchesToday = dispatches.filter((item) => item.executedAt.getTime() >= today.getTime())
-    const dispatchesLast24Hours = dispatches.filter((item) => item.executedAt.getTime() >= last24Hours)
     const messageNameById = new Map(messages.map((message) => [message.id, message.name]))
 
     const sentCount = dispatches.filter((item) => item.status === 'SENT').length
     const sentTodayCount = dispatchesToday.filter((item) => item.status === 'SENT').length
-    const failedLast24h = dispatchesLast24Hours.filter((item) => item.status === 'FAILED').length
+    const failedLast24h = dispatches.filter((item) => item.status === 'FAILED').length
     const retryingCount = pendingOutbound
     const activeGroups = groups.filter((group) => group.isActive).length
     const activeSchedules = schedules.filter((schedule) => schedule.isActive).length
-    const successRate = dispatchesLast24Hours.length === 0
+    const successRate = dispatches.length === 0
       ? 100
-      : Math.round((dispatchesLast24Hours.filter((item) => item.status === 'SENT').length / dispatchesLast24Hours.length) * 100)
+      : Math.round((dispatches.filter((item) => item.status === 'SENT').length / dispatches.length) * 100)
     const throughputPerHour = Math.round(sentCount / Math.max(1, Math.min(24, dispatches.length === 0 ? 1 : 24)))
 
     const timeline = [
