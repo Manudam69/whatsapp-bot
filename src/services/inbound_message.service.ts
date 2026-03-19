@@ -186,17 +186,22 @@ export const inboundMessageService = {
     // (flood messages sent before the user sees Paso 1). Process messages sent
     // after startCapture (genuine replies to Paso 1) as AWAITING_SERVICE.
     if (contact.currentFlow === 'AWAITING_REPORT') {
-      const msgTs =
-        typeof input.rawPayload?.messageTimestamp === 'number'
-          ? input.rawPayload.messageTimestamp * 1000
-          : null
-      if (msgTs !== null && msgTs > contact.updatedAt.getTime()) {
-        contact.currentFlow = 'AWAITING_SERVICE'
-      } else {
+      // messageTimestamp can be a plain number or a protobufjs Long object.
+      const rawTs = input.rawPayload?.messageTimestamp
+      let msgTs: number | null = null
+      if (typeof rawTs === 'number') {
+        msgTs = rawTs * 1000
+      } else if (rawTs != null && typeof (rawTs as any).toNumber === 'function') {
+        msgTs = (rawTs as any).toNumber() * 1000
+      }
+      // Discard only if the message was clearly sent before startCapture ran.
+      // If the timestamp is unavailable, let the message through.
+      if (msgTs !== null && msgTs <= contact.updatedAt.getTime()) {
         contact.currentFlow = 'AWAITING_SERVICE'
         await contact.save()
         return
       }
+      contact.currentFlow = 'AWAITING_SERVICE'
     }
 
     if (contact.currentFlow === 'AWAITING_SERVICE') {
