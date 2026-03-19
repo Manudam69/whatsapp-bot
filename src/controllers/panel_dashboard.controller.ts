@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from 'express'
 import { In, MoreThanOrEqual } from 'typeorm'
+import { config } from '@/config'
 import { AutoMessage } from '@/entities/auto_message.entity'
 import { IncidentReport } from '@/entities/incident_report.entity'
 import { NotificationDispatch } from '@/entities/notification_dispatch.entity'
@@ -9,6 +10,42 @@ import { WhatsappGroup } from '@/entities/whatsapp_group.entity'
 import { panelAdminService } from '@/services/panel_admin.service'
 import { panelConversationsService } from '@/services/panel_conversations.service'
 import { whatsappSessionManager } from '@/services/whatsapp_session_manager.service'
+
+function getNextScheduleInfo(schedules: NotificationSchedule[], timeZone: string): { minutesUntil: number; scheduleName: string } | null {
+  const now = new Date()
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    weekday: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
+  const parts = formatter.formatToParts(now)
+  const map = Object.fromEntries(parts.map((p) => [p.type, p.value]))
+  const weekdayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
+  const currentWeekday = weekdayMap[map.weekday] ?? now.getDay()
+  const currentTotalMinutes = currentWeekday * 24 * 60 + parseInt(map.hour, 10) * 60 + parseInt(map.minute, 10)
+
+  let minMinutesUntil = Infinity
+  let minScheduleName = ''
+
+  for (const schedule of schedules) {
+    if (!schedule.isActive) continue
+    for (const day of schedule.daysOfWeek) {
+      for (const time of schedule.times) {
+        const [h, m] = time.split(':').map(Number)
+        let minutesUntil = (day * 24 * 60 + h * 60 + m) - currentTotalMinutes
+        if (minutesUntil <= 0) minutesUntil += 7 * 24 * 60
+        if (minutesUntil < minMinutesUntil) {
+          minMinutesUntil = minutesUntil
+          minScheduleName = schedule.name
+        }
+      }
+    }
+  }
+
+  return minMinutesUntil === Infinity ? null : { minutesUntil: minMinutesUntil, scheduleName: minScheduleName }
+}
 
 export async function getDashboardOverview(req: Request, res: Response, next: NextFunction) {
   try {
@@ -46,6 +83,7 @@ export async function getDashboardOverview(req: Request, res: Response, next: Ne
     const retryingCount = pendingOutbound
     const activeGroups = groups.filter((group) => group.isActive).length
     const activeSchedules = schedules.filter((schedule) => schedule.isActive).length
+    const nextSchedule = getNextScheduleInfo(schedules, config.SCHEDULE_TIME_ZONE)
     const successRate = dispatches.length === 0
       ? 100
       : Math.round((dispatches.filter((item) => item.status === 'SENT').length / dispatches.length) * 100)
@@ -93,6 +131,7 @@ export async function getDashboardOverview(req: Request, res: Response, next: Ne
         totalGroups: groups.length,
         activeSchedules,
         totalSchedules: schedules.length,
+        nextSchedule,
         pendingReports: reports.filter((report) => report.reviewStatus === 'pending').length,
         messagesToday: sentTodayCount,
         sessionStatus: panelAdminService.mapSession(sessionState).status,
