@@ -42,6 +42,9 @@ export class ClientContact extends EntityBase {
   @Column({ name: 'last_report_at', type: 'timestamptz', nullable: true })
   lastReportAt?: Date
 
+  @Column({ name: 'report_flow_started_at', type: 'timestamptz', nullable: true })
+  reportFlowStartedAt?: Date
+
   @Column({ name: 'draft_service_name', type: 'varchar', nullable: true })
   draftServiceName?: string
 

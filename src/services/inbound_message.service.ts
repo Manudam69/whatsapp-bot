@@ -1,5 +1,7 @@
+import { MoreThan } from 'typeorm'
 import { ClientContact } from '@/entities/client_contact.entity'
 import { InboundMessage } from '@/entities/inbound_message.entity'
+import { OutboundMessage } from '@/entities/outbound_message.entity'
 import { ParsedIncidentReport } from './report_parser.service'
 import { outboundMessageService } from './outbound_message.service'
 import { botConfigurationService } from './bot_configuration.service'
@@ -74,13 +76,28 @@ function fillTemplate(template: string, values: Record<string, string>) {
   return Object.entries(values).reduce((result, [key, value]) => result.split(`{{${key}}}`).join(value), template)
 }
 
-function normalizeFlow(_contact: ClientContact) {
-  // No-op: AWAITING_REPORT is used as an intermediate state after startCapture
-  // to discard messages sent before the user sees the Paso 1 prompt.
+function getMessageTimestamp(rawPayload?: Record<string, unknown>) {
+  const rawTs = rawPayload?.messageTimestamp
+  if (typeof rawTs === 'number') {
+    return rawTs * 1000
+  }
+
+  if (rawTs != null && typeof (rawTs as { toNumber?: () => number }).toNumber === 'function') {
+    return (rawTs as { toNumber: () => number }).toNumber() * 1000
+  }
+
+  return null
+}
+
+function normalizeFlow(contact: ClientContact) {
+  if (contact.currentFlow === 'AWAITING_REPORT' && !contact.reportFlowStartedAt) {
+    contact.currentFlow = 'AWAITING_SERVICE'
+  }
 }
 
 function resetDraft(contact: ClientContact) {
   contact.currentFlow = 'IDLE'
+  contact.reportFlowStartedAt = null as unknown as undefined
   contact.draftServiceName = null as unknown as undefined
   contact.draftIncidentDate = null as unknown as undefined
   contact.draftIncidentTime = null as unknown as undefined
@@ -109,6 +126,7 @@ async function startCapture(contact: ClientContact, jid: string) {
   const settings = await botConfigurationService.get(contact.clientId, contact.sessionId)
   resetDraft(contact)
   contact.currentFlow = 'AWAITING_REPORT'
+  contact.reportFlowStartedAt = new Date()
   await contact.save()
   if (settings.firstReplyEnabled) {
     await outboundMessageService.queueText({
@@ -121,6 +139,27 @@ async function startCapture(contact: ClientContact, jid: string) {
     await outboundMessageService.queueText({ sessionId: contact.sessionId, recipientJid: jid, text: INITIAL_PROMPT, sourceType: 'FLOW_REPLY' })
   }
   await outboundMessageService.queueText({ sessionId: contact.sessionId, recipientJid: jid, text: PROMPTS.service, sourceType: 'FLOW_REPLY' })
+  contact.currentFlow = 'AWAITING_SERVICE'
+  await contact.save()
+}
+
+async function findLatestServicePrompt(contact: ClientContact, jid: string) {
+  if (!contact.reportFlowStartedAt) {
+    return null
+  }
+
+  return OutboundMessage.findOne({
+    where: {
+      sessionId: contact.sessionId,
+      recipientJid: jid,
+      sourceType: 'FLOW_REPLY',
+      status: 'SENT',
+      messageType: 'TEXT',
+      messageText: PROMPTS.service,
+      createdAt: MoreThan(contact.reportFlowStartedAt),
+    },
+    order: { createdAt: 'DESC' },
+  })
 }
 
 export const inboundMessageService = {
@@ -181,27 +220,20 @@ export const inboundMessageService = {
       return
     }
 
-    // AWAITING_REPORT is an intermediate state set by startCapture().
-    // Discard messages whose WhatsApp timestamp predates the startCapture call
-    // (flood messages sent before the user sees Paso 1). Process messages sent
-    // after startCapture (genuine replies to Paso 1) as AWAITING_SERVICE.
     if (contact.currentFlow === 'AWAITING_REPORT') {
-      // messageTimestamp can be a plain number or a protobufjs Long object.
-      const rawTs = input.rawPayload?.messageTimestamp
-      let msgTs: number | null = null
-      if (typeof rawTs === 'number') {
-        msgTs = rawTs * 1000
-      } else if (rawTs != null && typeof (rawTs as any).toNumber === 'function') {
-        msgTs = (rawTs as any).toNumber() * 1000
-      }
-      // Discard only if the message was clearly sent before startCapture ran.
-      // If the timestamp is unavailable, let the message through.
-      if (msgTs !== null && msgTs <= contact.updatedAt.getTime()) {
-        contact.currentFlow = 'AWAITING_SERVICE'
-        await contact.save()
+      const servicePrompt = await findLatestServicePrompt(contact, input.fromJid)
+      const messageTimestamp = getMessageTimestamp(input.rawPayload)
+
+      if (!servicePrompt?.sentAt) {
         return
       }
+
+      if (messageTimestamp !== null && messageTimestamp <= servicePrompt.sentAt.getTime()) {
+        return
+      }
+
       contact.currentFlow = 'AWAITING_SERVICE'
+      await contact.save()
     }
 
     if (contact.currentFlow === 'AWAITING_SERVICE') {
