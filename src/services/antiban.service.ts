@@ -395,6 +395,7 @@ export class AntiBan {
     const inactiveHours = (Date.now() - lastAt) / 3_600_000
     if (inactiveHours >= this.cfg.inactivityThresholdHours) {
       this.warmUpState.firstMessageAt = Date.now()
+      void saveWarmUpState(this.exportWarmUpState())
       return 1
     }
 
