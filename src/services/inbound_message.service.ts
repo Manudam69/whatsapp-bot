@@ -181,11 +181,22 @@ export const inboundMessageService = {
       return
     }
 
-    // Discard messages sent before the user sees the Paso 1 prompt.
+    // AWAITING_REPORT is an intermediate state set by startCapture().
+    // Discard messages whose WhatsApp timestamp predates the startCapture call
+    // (flood messages sent before the user sees Paso 1). Process messages sent
+    // after startCapture (genuine replies to Paso 1) as AWAITING_SERVICE.
     if (contact.currentFlow === 'AWAITING_REPORT') {
-      contact.currentFlow = 'AWAITING_SERVICE'
-      await contact.save()
-      return
+      const msgTs =
+        typeof input.rawPayload?.messageTimestamp === 'number'
+          ? input.rawPayload.messageTimestamp * 1000
+          : null
+      if (msgTs !== null && msgTs > contact.updatedAt.getTime()) {
+        contact.currentFlow = 'AWAITING_SERVICE'
+      } else {
+        contact.currentFlow = 'AWAITING_SERVICE'
+        await contact.save()
+        return
+      }
     }
 
     if (contact.currentFlow === 'AWAITING_SERVICE') {
