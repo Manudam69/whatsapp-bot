@@ -330,6 +330,8 @@ export class WhatsappSessionInstance {
       return
     }
 
+    await this.socket?.readMessages([message.key])
+
     const { inboundMessageService } = await import('./inbound_message.service')
     await inboundMessageService.processIncomingText({
       sessionId: this.sessionId,
