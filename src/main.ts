@@ -29,7 +29,7 @@ const corsOptions: cors.CorsOptions = {
     callback(new Error(`Origin not allowed by CORS: ${origin}`))
   },
   methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Authorization', 'Content-Type'],
+  allowedHeaders: ['Authorization', 'Content-Type', 'Cache-Control'],
   optionsSuccessStatus: 204,
 }
 
