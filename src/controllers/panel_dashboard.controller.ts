@@ -23,8 +23,10 @@ function getNextScheduleInfo(schedules: NotificationSchedule[], timeZone: string
   const parts = formatter.formatToParts(now)
   const map = Object.fromEntries(parts.map((p) => [p.type, p.value]))
   const weekdayMap: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 }
-  const currentWeekday = weekdayMap[map.weekday] ?? now.getDay()
-  const currentTotalMinutes = currentWeekday * 24 * 60 + parseInt(map.hour, 10) * 60 + parseInt(map.minute, 10)
+  let parsedHour = parseInt(map.hour, 10)
+  let currentWeekday = weekdayMap[map.weekday] ?? now.getDay()
+  if (parsedHour === 24) { parsedHour = 0; currentWeekday = (currentWeekday + 1) % 7 }
+  const currentTotalMinutes = currentWeekday * 24 * 60 + parsedHour * 60 + parseInt(map.minute, 10)
 
   let minMinutesUntil = Infinity
   let minScheduleName = ''
