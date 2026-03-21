@@ -138,17 +138,30 @@ class OutboundMessageService {
       order: { createdAt: 'ASC' },
     })
 
+    let someRateLimited = false
     for (const message of pending) {
       const currentSession = await getSessionInstance(sessionId)
       if (!currentSession?.isConnected()) {
         return
       }
 
-      await this.deliver(message)
+      const rateLimited = await this.deliver(message)
+      if (rateLimited) someRateLimited = true
+    }
+
+    // One or more scheduled messages hit the per-minute antiban limit and were
+    // left PENDING. Schedule a retry flush right after the current minute window
+    // resets so they get processed at the end of the queue without being lost.
+    if (someRateLimited && SCHEDULE_SOURCES.some((s) => sourceTypes.includes(s))) {
+      const msUntilNextMinute = (60 - new Date().getSeconds() + 2) * 1000
+      logger.info(`[antiban] Scheduled messages hit per-minute limit; retrying in ${Math.round(msUntilNextMinute / 1000)}s`)
+      setTimeout(() => { void this.flushScheduled(sessionId) }, msUntilNextMinute)
     }
   }
 
-  private async deliver(message: OutboundMessage) {
+  // Returns true when the message hit the per-minute antiban limit and was left
+  // PENDING so the caller can schedule a retry after the window resets.
+  private async deliver(message: OutboundMessage): Promise<boolean> {
     const isScheduled = message.sourceType === 'SCHEDULE'
     const session = await getSessionInstance(message.sessionId)
 
@@ -157,7 +170,7 @@ class OutboundMessageService {
       if (!currentSession?.isConnected()) {
         message.errorMessage = 'WhatsApp session is not connected'
         await message.save()
-        return
+        return false
       }
 
       const content = message.messageText || message.caption || 'media'
@@ -175,12 +188,20 @@ class OutboundMessageService {
         const skipIdenticalCheck = botConfig?.skipIdenticalMessageCheck ?? false
         const decision = await antibanService.beforeSend(message.recipientJid, content, { skipIdenticalCheck })
         if (!decision.allowed) {
+          // Per-minute rate limit: leave the message PENDING so it gets picked
+          // up by the next flush after the current minute window resets.
+          if (decision.reason?.includes('per-minute limit')) {
+            logger.info(`[antiban] Message ${message.id} hit per-minute limit; will retry after window resets`)
+            return true
+          }
+
+          // All other antiban blocks (daily, hourly, paused, warm-up) → permanent failure.
           message.status = 'FAILED'
           message.errorMessage = decision.reason ?? 'antiban: límite diario alcanzado'
           await message.save()
           await this.afterFailure(message)
           logger.warn(`[antiban] Notificación programada ${message.id} expirada: ${decision.reason}`)
-          return
+          return false
         }
 
         if (decision.delayMs > 0) {
@@ -218,7 +239,7 @@ class OutboundMessageService {
         }
         await message.save()
         await this.afterDelivery(message)
-        return
+        return false
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error)
         if (isScheduled) antibanService.afterSendFailed(errorMessage)
@@ -226,20 +247,21 @@ class OutboundMessageService {
         await message.save()
 
         if (isDisconnectedError(error)) {
-          return
+          return false
         }
 
         if (message.attempts >= message.maxAttempts) {
           message.status = 'FAILED'
           await message.save()
           await this.afterFailure(message)
-          return
+          return false
         }
 
         logger.warn(`Outbound message ${message.id} failed on attempt ${message.attempts}: ${errorMessage}. Retrying...`)
         await sleep(message.retryDelayMs)
       }
     }
+    return false
   }
 
   private async afterDelivery(message: OutboundMessage) {
