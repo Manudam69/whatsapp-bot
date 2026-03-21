@@ -3,7 +3,7 @@ import { AppDataSource } from '@/database/datasource'
 import logger from '@/utils/logger'
 import { WhatsappSessionInstance, SessionState } from './whatsapp_session_instance'
 
-class WhatsappSessionManager {
+export class WhatsappSessionManager {
   private sessions = new Map<string, WhatsappSessionInstance>()
 
   /**
@@ -37,6 +37,9 @@ class WhatsappSessionManager {
       return await instance.start()
     } catch (err) {
       logger.error(`WhatsappSessionManager: failed to start session ${sessionId}: ${err instanceof Error ? err.message : err}`)
+      // Remove the zombie instance so the session can be retried and resources are freed
+      this.sessions.delete(sessionId)
+      try { await instance.stop() } catch { /* best-effort cleanup */ }
       return instance.getSessionState()
     }
   }

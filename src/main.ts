@@ -8,6 +8,7 @@ import { config, validateConfig } from '@/config'
 import logger from '@/utils/logger'
 import { AppDataSource } from '@/database/datasource'
 import handleErrorMiddleware from '@/middlewares/error_handler'
+import { requestId } from '@/middlewares/request_id'
 import { authenticate } from '@/middlewares/authenticate'
 import { initFileBasedRoutes } from '@/utils/file_routes'
 import { changePassword, login } from '@/controllers/auth.controller'
@@ -53,6 +54,7 @@ async function bootstrap() {
   router.put('/auth/change-password', authenticate, changePassword)
   await initFileBasedRoutes(router)
 
+  app.use(requestId)
   app.use(morgan('[:date[iso]] (:status) ":method :url HTTP/:http-version" :response-time ms - [:res[content-length]]'))
   app.use(cors(corsOptions))
   app.use(helmet({

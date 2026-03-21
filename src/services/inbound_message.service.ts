@@ -1,13 +1,17 @@
 import { MoreThan } from 'typeorm'
 import { ClientContact } from '@/entities/client_contact.entity'
+import { IncidentReport } from '@/entities/incident_report.entity'
 import { InboundMessage } from '@/entities/inbound_message.entity'
 import { OutboundMessage } from '@/entities/outbound_message.entity'
+import { AppDataSource } from '@/database/datasource'
 import { ParsedIncidentReport } from './report_parser.service'
 import { outboundMessageService } from './outbound_message.service'
 import { botConfigurationService } from './bot_configuration.service'
 import { groupService } from './group.service'
-import { reportService, formatReportMessage } from './report.service'
+import { reportService, formatReportMessage, buildFolio } from './report.service'
 import { whatsappIdentityService } from './whatsapp_identity.service'
+import { sseService } from './sse.service'
+import { isValidDate, isValidTime } from '@/utils/validators'
 import logger from '@/utils/logger'
 
 const INITIAL_PROMPT =
@@ -46,31 +50,8 @@ function pickVariant(variants: readonly string[]): string {
   return variants[Math.floor(Math.random() * variants.length)]!
 }
 
-// Acepta DD/MM/AAAA, DD-MM-AAAA o DD.MM.AAAA con años de 2 o 4 dígitos
-const DATE_REGEX = /^\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}$/
-
-// Acepta HH:MM o HH:MM:SS (24 hrs)
-const TIME_REGEX = /^\d{1,2}:\d{2}(:\d{2})?$/
-
 const SERVICE_MIN_LENGTH = 2
 const INCIDENT_MIN_LENGTH = 5
-
-function isValidDate(value: string) {
-  if (!DATE_REGEX.test(value)) {
-    return false
-  }
-  const parts = value.split(/[\/\-\.]/).map(Number)
-  const [day, month] = parts
-  return day >= 1 && day <= 31 && month >= 1 && month <= 12
-}
-
-function isValidTime(value: string) {
-  if (!TIME_REGEX.test(value)) {
-    return false
-  }
-  const [hours, minutes] = value.split(':').map(Number)
-  return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59
-}
 
 function fillTemplate(template: string, values: Record<string, string>) {
   return Object.entries(values).reduce((result, [key, value]) => result.split(`{{${key}}}`).join(value), template)
@@ -280,7 +261,41 @@ async function processTextForContact(contact: ClientContact, input: {
   const parsed = buildDraft(contact)
   const sourceMessage = `Servicio: ${parsed.serviceName} | Fecha: ${parsed.incidentDate} | Hora: ${parsed.incidentTime} | Incidencia: ${parsed.incidentText}`
 
-  const report = await reportService.createFromInbound(contact, parsed, sourceMessage)
+  // Atomically create the report and reset the contact draft in a single transaction.
+  // This guarantees the contact is never left stuck in AWAITING_CONFIRMATION if the
+  // process crashes between the two operations.
+  let report: IncidentReport
+  try {
+    report = await AppDataSource.transaction(async (manager) => {
+      const newReport = manager.create(IncidentReport, {
+        clientId: contact.clientId,
+        folio: buildFolio(),
+        contact,
+        serviceName: parsed.serviceName,
+        incidentDate: parsed.incidentDate,
+        incidentTime: parsed.incidentTime,
+        incidentText: parsed.incidentText,
+        sourceMessage,
+        receivedAt: new Date(),
+        status: 'RECEIVED',
+        reviewStatus: 'pending',
+      })
+      await manager.save(newReport)
+
+      contact.lastReportAt = new Date()
+      resetDraft(contact)
+      await manager.save(contact)
+
+      return newReport
+    })
+  } catch (txError) {
+    logger.error(`Failed to create incident report (transaction rolled back): ${txError instanceof Error ? txError.message : String(txError)}`)
+    return
+  }
+
+  sseService.emit(contact.clientId, 'report:created', { id: report.id })
+  sseService.emit(contact.clientId, 'dashboard:refresh')
+
   const settings = await botConfigurationService.get(clientId, sessionId)
   const configuredOperationsGroupJid = settings.operationalGroupId || reportService.getOperationsGroupJid()
   const operationsGroupJid = configuredOperationsGroupJid
@@ -301,8 +316,6 @@ async function processTextForContact(contact: ClientContact, input: {
       sourceId: report.id,
       metadata: { groupJid: operationsGroupJid },
     })
-    resetDraft(contact)
-    await contact.save()
     if (settings.confirmationEnabled) {
       await outboundMessageService.queueText({
         sessionId,
@@ -314,8 +327,6 @@ async function processTextForContact(contact: ClientContact, input: {
   } catch (error) {
     logger.error(`Failed to forward incident report ${report.folio}: ${error instanceof Error ? error.message : String(error)}`)
     await reportService.markFailed(report, operationsGroupJid || undefined)
-    resetDraft(contact)
-    await contact.save()
     if (settings.confirmationEnabled) {
       await outboundMessageService.queueText({
         sessionId,
@@ -327,7 +338,18 @@ async function processTextForContact(contact: ClientContact, input: {
   }
 }
 
-export const inboundMessageService = {
+type InboundMessageServiceDeps = {
+  outbound: typeof outboundMessageService
+  botConfig: typeof botConfigurationService
+  groups: typeof groupService
+  reports: typeof reportService
+  identity: typeof whatsappIdentityService
+  sse: typeof sseService
+}
+
+export class InboundMessageService {
+  constructor(private readonly deps: InboundMessageServiceDeps) {}
+
   async processIncomingText(input: {
     sessionId: string
     clientId: string
@@ -350,7 +372,7 @@ export const inboundMessageService = {
       }
     }
 
-    const contact = await whatsappIdentityService.upsertContactFromInbound(
+    const contact = await this.deps.identity.upsertContactFromInbound(
       input.sessionId,
       input.clientId,
       input.fromJid,
@@ -377,7 +399,7 @@ export const inboundMessageService = {
       text: trimmedText,
       rawPayload: input.rawPayload,
     })
-  },
+  }
 
   async replayStoredMessage(message: InboundMessage) {
     const contact = message.contact
@@ -388,5 +410,15 @@ export const inboundMessageService = {
       text: message.body,
       rawPayload: message.rawPayload,
     })
-  },
+  }
 }
+
+// Singleton wired with concrete dependencies — swap deps here for testing
+export const inboundMessageService = new InboundMessageService({
+  outbound: outboundMessageService,
+  botConfig: botConfigurationService,
+  groups: groupService,
+  reports: reportService,
+  identity: whatsappIdentityService,
+  sse: sseService,
+})
