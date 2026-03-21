@@ -162,6 +162,7 @@ export const panelAdminService = {
       status: dispatch.status === 'SENT' ? 'success' : dispatch.status === 'FAILED' ? 'failed' : 'retrying',
       error: dispatch.errorMessage,
       retryCount: dispatch.attempts,
+      rateLimitedCount: dispatch.rateLimitedCount ?? 0,
       canRevokeFromWhatsapp,
     }
   },

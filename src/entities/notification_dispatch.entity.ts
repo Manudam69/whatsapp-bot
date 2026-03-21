@@ -36,4 +36,7 @@ export class NotificationDispatch extends EntityBase {
 
   @Column({ name: 'error_message', type: 'text', nullable: true })
   errorMessage?: string
+
+  @Column({ name: 'rate_limited_count', default: 0 })
+  rateLimitedCount: number
 }

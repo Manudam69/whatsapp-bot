@@ -191,6 +191,10 @@ class OutboundMessageService {
           // Per-minute rate limit: leave the message PENDING so it gets picked
           // up by the next flush after the current minute window resets.
           if (decision.reason?.includes('per-minute limit')) {
+            const dispatchId = typeof message.metadata?.dispatchId === 'string' ? message.metadata.dispatchId : undefined
+            if (dispatchId) {
+              await AppDataSource.getRepository(NotificationDispatch).increment({ id: dispatchId }, 'rateLimitedCount', 1)
+            }
             logger.info(`[antiban] Message ${message.id} hit per-minute limit; will retry after window resets`)
             return true
           }
