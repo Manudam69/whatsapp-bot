@@ -50,6 +50,11 @@ async function dispatchSchedule(schedule: NotificationSchedule, sessionId: strin
     return
   }
 
+  for (let i = activeGroupJids.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [activeGroupJids[i], activeGroupJids[j]] = [activeGroupJids[j]!, activeGroupJids[i]!]
+  }
+
   for (let i = 0; i < activeGroupJids.length; i++) {
     const groupJid = activeGroupJids[i]
     const { messageText, mediaFilePath, mediaAssetPath } = await resolveMessageForGroup(clientId, schedule, i)
