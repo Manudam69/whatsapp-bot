@@ -72,6 +72,8 @@ async function dispatchSchedule(schedule: NotificationSchedule, sessionId: strin
       errorMessage: undefined,
     })
 
+    await whatsappSessionManager.getSession(sessionId)?.sendTyping(groupJid)
+
     if (mediaFilePath) {
       await outboundMessageService.queueMedia({
         sessionId,
